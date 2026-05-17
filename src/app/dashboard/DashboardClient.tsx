@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calculate, getEfficiencyCurve } from '@/lib/turbine-calc'
-import { exportJSON, exportCSV, exportExcel, importJSON } from '@/lib/export'
+import { exportJSON, exportCSV, exportExcel, exportDXF, importJSON } from '@/lib/export'
 import type { TurbineInputs, TurbineResults, TurbineType, HQRange, NsRange } from '@/types'
 import { useRouter } from 'next/navigation'
 import {
@@ -369,6 +369,11 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const handleExportExcel = async () => {
     setExportLoading('excel')
     try { await exportExcel(inputs, results, exportName || results.turbineType) } catch (e) { console.error(e) }
+    finally { setExportLoading(null); setShowExportModal(false) }
+  }
+  const handleExportDXF = async () => {
+    setExportLoading('dxf')
+    try { await exportDXF(results, exportName || results.turbineType) } catch (e) { console.error(e) }
     finally { setExportLoading(null); setShowExportModal(false) }
   }
 
@@ -1064,6 +1069,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
               { icon: 'xlsx', label: 'Excel (.xlsx)', desc: '全パラメータ・判定結果を2シートで出力', color: 'var(--ok)', action: handleExportExcel, loading: exportLoading === 'excel' },
               { icon: 'json', label: 'JSON (.json)',  desc: '入力値＋全計算結果。「読込」ボタンで再インポート可', color: 'var(--accent)', action: handleExportJSON, loading: false },
               { icon: 'csv',  label: 'CSV (.csv)',    desc: 'Excelで開ける軽量フォーマット', color: 'var(--warn)', action: handleExportCSV, loading: false },
+              { icon: 'dxf',  label: 'DXF (.dxf)',   desc: 'CAD用概略断面図（フランシス水車のみ）', color: '#22d3ee', action: handleExportDXF, loading: exportLoading === 'dxf' },
             ].map(opt => (
               <button key={opt.label} onClick={opt.action} disabled={opt.loading}
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', border: `1px solid ${opt.color}`, cursor: 'pointer', transition: 'all 0.15s', background: `color-mix(in srgb, ${opt.color} 8%, transparent)`, opacity: opt.loading ? 0.6 : 1 }}

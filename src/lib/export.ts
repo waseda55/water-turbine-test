@@ -374,3 +374,32 @@ export async function exportExcel(
   const safe = caseName.replace(/[\\/:*?"<>|]/g, '_')
   downloadBlob(blob, `turbine_${safe}_${timestamp()}.xlsx`)
 }
+
+// ─── DXF エクスポート ──────────────────────────────────────────────────────────
+export async function exportDXF(
+  results: TurbineResults,
+  caseName: string = '無題'
+): Promise<void> {
+  switch (results.turbineType) {
+    case 'フランシス水車': {
+      if (!results.dimensions.francis) break
+      const { exportFrancisDxf } = await import('./export-dxf')
+      await exportFrancisDxf(results, caseName)
+      return
+    }
+    case 'カプラン水車': {
+      if (!results.dimensions.kaplan) break
+      const { exportKaplanDxf } = await import('./export-dxf-kaplan')
+      await exportKaplanDxf(results, caseName)
+      return
+    }
+    case 'ペルトン水車': {
+      if (!results.dimensions.pelton) break
+      const { exportPeltonDxf } = await import('./export-dxf-pelton')
+      await exportPeltonDxf(results, caseName)
+      return
+    }
+    default:
+      console.warn(`DXFエクスポートはフランシス・カプラン・ペルトン水車に対応しています（${results.turbineType} は未対応）`)
+  }
+}
