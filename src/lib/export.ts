@@ -378,13 +378,14 @@ export async function exportExcel(
 // ─── DXF エクスポート ──────────────────────────────────────────────────────────
 export async function exportDXF(
   results: TurbineResults,
-  caseName: string = '無題'
+  caseName: string = '無題',
+  inputs?: TurbineInputs
 ): Promise<void> {
   switch (results.turbineType) {
     case 'フランシス水車': {
       if (!results.dimensions.francis) break
       const { exportFrancisDxf } = await import('./export-dxf')
-      await exportFrancisDxf(results, caseName)
+      await exportFrancisDxf(results, caseName, inputs)
       return
     }
     case 'カプラン水車': {

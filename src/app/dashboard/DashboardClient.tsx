@@ -373,7 +373,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   }
   const handleExportDXF = async () => {
     setExportLoading('dxf')
-    try { await exportDXF(results, exportName || results.turbineType) } catch (e) { console.error(e) }
+    try { await exportDXF(results, exportName || results.turbineType, inputs) } catch (e) { console.error(e) }
     finally { setExportLoading(null); setShowExportModal(false) }
   }
 
