@@ -100,14 +100,15 @@ function calcTubularDimensions(ns: number, flowRate: number, runnerDiameter: num
 }
 
 // ── 自動形式選択 ───────────────────────────────────────────────
+// ※ クロスフロー水車は自動選定対象外（手動選択のみ）
 function autoSelectType(head: number, flowRate: number, specificSpeed: number): TurbineType {
-  // チューブラ：超低落差（2〜30m）かつ大流量（1m³/s以上）
-  if (head <= 30 && flowRate >= 1.0 && specificSpeed >= 300) return 'チューブラ水車'
-  // クロスフロー：低〜中落差（2〜200m）かつ小〜中流量（0.02〜10m³/s）
-  if (head <= 200 && flowRate <= 10 && specificSpeed >= 50 && specificSpeed < 300) return 'クロスフロー水車'
-  // 既存3形式
-  if (head > 300 || specificSpeed < 100) return 'ペルトン水車'
+  // チューブラ：超低落差（H≦20m）かつ大流量・高比速度
+  if (head <= 20 && flowRate >= 1.0 && specificSpeed >= 300) return 'チューブラ水車'
+  // ペルトン：高落差（H>200m）または低比速度
+  if (head > 200 || specificSpeed < 80) return 'ペルトン水車'
+  // フランシス：中落差・中比速度
   if (specificSpeed < 300) return 'フランシス水車'
+  // カプラン：低落差・高比速度
   return 'カプラン水車'
 }
 
