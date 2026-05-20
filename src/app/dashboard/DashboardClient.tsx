@@ -53,6 +53,131 @@ const DEFAULT_INPUTS: TurbineInputs = {
   penstock: { length: 500, material: 'steel' },
 }
 
+import type { VelocityTriangle } from '@/types'
+
+// ─── 速度三角形 SVG ───────────────────────────────────────────
+function VelocityTriangleSVG({ tri, label, color }: { tri: VelocityTriangle; label: string; color: string }) {
+  const W = 260, H = 160
+  const CX = 40, CY = 110
+  const SCALE = Math.min(100 / Math.max(tri.u, tri.c, tri.w, 1), 8)
+  const ux = CX + tri.u * SCALE, uy = CY
+  const cx2 = CX + tri.cu * SCALE, cy2 = CY - tri.cm * SCALE
+
+  const arrow = (x1: number, y1: number, x2: number, y2: number, col: string, dash = '') => {
+    const dx = x2 - x1, dy = y2 - y1
+    const len = Math.sqrt(dx * dx + dy * dy)
+    if (len < 2) return null
+    const ax = dx / len, ay = dy / len
+    const hx = x2 - ax * 8, hy = y2 - ay * 8
+    const px = -ay * 4, py = ax * 4
+    return (
+      <g>
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={col} strokeWidth="1.8" strokeDasharray={dash} />
+        <polygon points={`${x2},${y2} ${hx + px},${hy + py} ${hx - px},${hy - py}`} fill={col} />
+      </g>
+    )
+  }
+
+  const fmt = (v: number) => v.toFixed(1)
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxHeight: H, display: 'block' }}>
+      <line x1={CX - 10} y1={CY} x2={W - 10} y2={CY} stroke="var(--border)" strokeWidth="0.8" strokeDasharray="3 3" />
+      <line x1={CX} y1={10} x2={CX} y2={CY + 10} stroke="var(--border)" strokeWidth="0.8" strokeDasharray="3 3" />
+      {arrow(CX, CY, ux, uy, '#60a5fa')}
+      <text x={(CX + ux) / 2} y={CY + 14} fill="#60a5fa" fontSize="9" textAnchor="middle" fontFamily="JetBrains Mono">u={fmt(tri.u)}</text>
+      {arrow(CX, CY, cx2, cy2, color)}
+      <text x={cx2 + 4} y={cy2 - 4} fill={color} fontSize="9" fontFamily="JetBrains Mono">c={fmt(tri.c)}</text>
+      {arrow(ux, uy, cx2, cy2, '#fb923c', '4 2')}
+      <text x={(ux + cx2) / 2 + 6} y={(uy + cy2) / 2} fill="#fb923c" fontSize="9" fontFamily="JetBrains Mono">w={fmt(tri.w)}</text>
+      {tri.cm > 1 && (() => {
+        const r = 18
+        const x2a = CX + r * Math.cos(-Math.atan2(tri.cm, tri.cu)), y2a = CY + r * Math.sin(-Math.atan2(tri.cm, tri.cu))
+        return (
+          <g>
+            <path d={`M ${CX + r} ${CY} A ${r} ${r} 0 0 1 ${x2a} ${y2a}`} fill="none" stroke={color} strokeWidth="1" opacity="0.5" />
+            <text x={CX + r + 6} y={CY - 4} fill={color} fontSize="8" fontFamily="JetBrains Mono">α={fmt(Math.abs(tri.alpha))}°</text>
+          </g>
+        )
+      })()}
+      {Math.abs(tri.wu) > 0.5 && (() => {
+        const r = 14
+        const betaRad = Math.atan2(tri.cm, Math.abs(tri.wu))
+        const x1b = ux + r * Math.cos(-betaRad) * Math.sign(tri.wu), y1b = uy + r * Math.sin(-betaRad)
+        return (
+          <g>
+            <path d={`M ${ux + r * Math.sign(tri.wu)} ${uy} A ${r} ${r} 0 0 0 ${x1b} ${y1b}`} fill="none" stroke="#fb923c" strokeWidth="1" opacity="0.5" />
+            <text x={ux - 8} y={uy + 22} fill="#fb923c" fontSize="8" fontFamily="JetBrains Mono">β={fmt(Math.abs(tri.beta))}°</text>
+          </g>
+        )
+      })()}
+      <text x={W / 2} y={14} fill="var(--muted)" fontSize="9" textAnchor="middle" fontFamily="JetBrains Mono" fontWeight="700" letterSpacing="0.08em">{label}</text>
+    </svg>
+  )
+}
+
+function VelocityTrianglePanel({ results, color }: { results: import('@/types').TurbineResults; color: string }) {
+  const vt = results.velocityTriangles
+  if (!vt) return (
+    <div className="panel" style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+      この水車形式の速度三角形データは未対応です
+    </div>
+  )
+  const eulerHead = (vt.inlet.u * vt.inlet.cu - vt.outlet.u * vt.outlet.cu) / 9.81
+  const rows = (tri: VelocityTriangle) => [
+    ['周速 u',            `${tri.u.toFixed(2)} m/s`],
+    ['絶対速度 c',        `${tri.c.toFixed(2)} m/s`],
+    ['相対速度 w',        `${tri.w.toFixed(2)} m/s`],
+    ['絶対速度角 α',     `${Math.abs(tri.alpha).toFixed(1)} °`],
+    ['相対速度角 β',     `${Math.abs(tri.beta).toFixed(1)} °`],
+    ['周方向絶対分速 cu', `${tri.cu.toFixed(2)} m/s`],
+    ['子午面分速 cm',     `${tri.cm.toFixed(2)} m/s`],
+    ['周方向相対分速 wu', `${tri.wu.toFixed(2)} m/s`],
+  ]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '8px 12px', background: `color-mix(in srgb, ${color} 6%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`, fontSize: 10, color: 'var(--muted)', lineHeight: 1.7 }}>
+        <span style={{ color, fontWeight: 700 }}>{results.turbineType}</span> — 設計点（100% 負荷）速度三角形。
+        ユーラー理論水頭：<span style={{ color, fontWeight: 700, fontFamily: 'JetBrains Mono' }}>He = {eulerHead.toFixed(1)} m</span>　※概略推算値
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="panel" style={{ padding: 12 }}>
+          <div className="sec-hd">ランナー入口（添字 1）</div>
+          <VelocityTriangleSVG tri={vt.inlet} label="INLET" color={color} />
+          <div style={{ marginTop: 8 }}>
+            {rows(vt.inlet).map(([l, v]) => (
+              <div key={l} className="data-row"><span className="data-row-label">{l}</span><span className="data-row-val">{v}</span></div>
+            ))}
+          </div>
+        </div>
+        <div className="panel" style={{ padding: 12 }}>
+          <div className="sec-hd">ランナー出口（添字 2）</div>
+          <VelocityTriangleSVG tri={vt.outlet} label="OUTLET" color={color} />
+          <div style={{ marginTop: 8 }}>
+            {rows(vt.outlet).map(([l, v]) => (
+              <div key={l} className="data-row"><span className="data-row-label">{l}</span><span className="data-row-val">{v}</span></div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="panel" style={{ padding: 10 }}>
+        <div className="sec-hd">凡例</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px 16px', fontSize: 10, color: 'var(--muted)', lineHeight: 1.8 }}>
+          {[
+            ['u', '周速', '#60a5fa'], ['c', '絶対速度', color], ['w', '相対速度', '#fb923c'],
+            ['α', '絶対速度角', color], ['β', '相対速度角', '#fb923c'], ['cu', '絶対速度周方向成分', '#60a5fa'],
+            ['cm', '子午面成分', 'var(--muted)'], ['wu', '相対速度周方向成分', '#fb923c'], ['He', 'ユーラー水頭', color],
+          ].map(([sym, desc, col]) => (
+            <div key={sym} style={{ display: 'flex', gap: 6 }}>
+              <span style={{ color: col, fontFamily: 'JetBrains Mono', fontWeight: 700, minWidth: 24 }}>{sym}</span>
+              <span>{desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Badge ────────────────────────────────────────────────────
 function Badge({ result }: { result: string }) {
   const cls: Record<string, string> = { OK: 'badge-ok', NG: 'badge-ng', '注意': 'badge-warn', 'N/A': 'badge-info', INFO: 'badge-info' }
@@ -308,7 +433,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const [importMsg, setImportMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [sidebarTab, setSidebarTab] = useState<'history' | 'projects'>('history')
-  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic'>('result')
+  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity'>('result')
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [flowUnit, setFlowUnit] = useState<FlowUnit>('m3/s')
   const router = useRouter()
@@ -593,7 +718,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
         {/* ── CENTER: Results ── */}
         <main className="flex-1 overflow-y-auto min-w-0 flex flex-col" style={{ background: 'var(--bg)' }}>
           <div style={{ display: 'flex', gap: 0, padding: '0 16px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
-            {([{ id: 'result', label: '計算結果' }, { id: 'hq', label: 'H-Q 選定図' }, { id: 'ns', label: 'Ns 分布図' }, { id: 'schematic', label: '📐 概略図' }] as const).map(tab => (
+	{([{ id: 'result', label: '計算結果' }, { id: 'hq', label: 'H-Q 選定図' }, { id: 'ns', label: 'Ns 分布図' }, { id: 'schematic', label: '📐 概略図' }, { id: 'velocity', label: '🔺 速度三角形' }] as const).map(tab => (
               <button key={tab.id} onClick={() => setMainTab(tab.id)} className={`tab ${mainTab === tab.id ? 'active' : ''}`}>{tab.label}</button>
             ))}
           </div>
@@ -979,6 +1104,10 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                 </div>
                 <TurbineSchematic results={results} />
               </div>
+            )}
+
+            {mainTab === 'velocity' && (
+              <VelocityTrianglePanel results={results} color={typeColor} />
             )}
           </div>
         </main>

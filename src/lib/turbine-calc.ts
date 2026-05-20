@@ -1,4 +1,4 @@
-import type { TurbineInputs, TurbineResults, TurbineType } from '@/types'
+import type { TurbineInputs, TurbineResults, TurbineType, VelocityTriangle } from '@/types'
 
 const RHO = 1000
 const G   = 9.81
@@ -114,6 +114,73 @@ function autoSelectType(head: number, flowRate: number, specificSpeed: number): 
   if (specificSpeed < 300) return 'フランシス水車'
   // カプラン：低落差・高比速度
   return 'カプラン水車'
+}
+
+// ── 速度三角形ヘルパー ────────────────────────────────────────
+function makeTriangle(u: number, cu: number, cm: number): VelocityTriangle {
+  const c     = Math.sqrt(cu * cu + cm * cm)
+  const wu    = cu - u
+  const w     = Math.sqrt(wu * wu + cm * cm)
+  const alpha = Math.atan2(cm, cu) * 180 / PI
+  const beta  = Math.atan2(cm, wu) * 180 / PI
+  return { u, c, w, alpha, beta, cu, cm, wu }
+}
+
+function calcPeltonVelocityTriangles(head: number, ratedRpm: number, runnerDiameter: number) {
+  const Cv = 0.97
+  const c1 = Cv * Math.sqrt(2 * G * head)
+  const u  = (PI * runnerDiameter * ratedRpm) / 60
+  const inlet = makeTriangle(u, c1, 0)
+  const beta2Rad = (180 - 165) * PI / 180
+  const k = 0.90
+  const w2 = k * Math.abs(inlet.wu)
+  const outletCu = u + (-w2 * Math.cos(beta2Rad))
+  const outletCm =  w2 * Math.sin(beta2Rad)
+  const outlet = makeTriangle(u, outletCu, outletCm)
+  return { inlet, outlet }
+}
+
+function calcFrancisVelocityTriangles(
+  head: number, flowRate: number, specificSpeed: number,
+  ratedRpm: number, runnerDiameter: number,
+) {
+  const u1  = (PI * runnerDiameter * ratedRpm) / 60
+  const b1  = runnerDiameter * 0.18 * Math.pow(specificSpeed / 100, 0.45)
+  const cm1 = flowRate / (PI * runnerDiameter * b1)
+  const beta1_rad = (55 + 30 * (specificSpeed - 80) / 220) * PI / 180
+  const cu1 = u1 - cm1 / Math.tan(beta1_rad)
+  const inlet = makeTriangle(u1, cu1, cm1)
+  const u2    = (PI * runnerDiameter * 0.72 * ratedRpm) / 60
+  const draftD = Math.sqrt(4 * flowRate / (PI * 4.0))
+  const cm2    = flowRate / (PI * (draftD / 2) ** 2)
+  const outlet = makeTriangle(u2, 0, cm2)
+  return { inlet, outlet }
+}
+
+function calcAxialVelocityTriangles(
+  head: number, flowRate: number, specificSpeed: number,
+  ratedRpm: number, runnerDiameter: number, hubRatio: number,
+) {
+  const rTip  = runnerDiameter / 2
+  const rMean = (rTip + rTip * hubRatio) / 2
+  const u1    = (PI * 2 * rMean * ratedRpm) / 60
+  const cm1   = flowRate / (PI * (rTip ** 2 - (rTip * hubRatio) ** 2))
+  const cu1   = (G * head) / u1
+  const inlet  = makeTriangle(u1, cu1, cm1)
+  const outlet = makeTriangle(u1, 0, cm1)
+  return { inlet, outlet }
+}
+
+function calcCrossflowVelocityTriangles(
+  head: number, flowRate: number,
+  ratedRpm: number, runnerDiameter: number, runnerWidth: number,
+) {
+  const u    = (PI * runnerDiameter * ratedRpm) / 60
+  const c1   = 0.98 * Math.sqrt(2 * G * head)
+  const alpha1_rad = 16 * PI / 180
+  const inlet  = makeTriangle(u, c1 * Math.cos(alpha1_rad), c1 * Math.sin(alpha1_rad))
+  const outlet = makeTriangle(u * 0.66, 0, inlet.cm * 1.1)
+  return { inlet, outlet }
 }
 
 // ── メイン計算 ─────────────────────────────────────────────────
@@ -247,6 +314,20 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType): Turb
     },
   }
 
+  // ── 速度三角形 ──
+  let velocityTriangles: TurbineResults['velocityTriangles'] = null
+  if (turbineType === 'ペルトン水車') {
+    velocityTriangles = calcPeltonVelocityTriangles(head, ratedRpm, runnerDiameter)
+  } else if (turbineType === 'フランシス水車') {
+    velocityTriangles = calcFrancisVelocityTriangles(head, flowRate, specificSpeed, ratedRpm, runnerDiameter)
+  } else if (turbineType === 'カプラン水車') {
+    velocityTriangles = calcAxialVelocityTriangles(head, flowRate, specificSpeed, ratedRpm, runnerDiameter, kaplanDim!.hubRatio)
+  } else if (turbineType === 'チューブラ水車') {
+    velocityTriangles = calcAxialVelocityTriangles(head, flowRate, specificSpeed, ratedRpm, runnerDiameter, tubularDim!.hubRatio)
+  } else if (turbineType === 'クロスフロー水車') {
+    velocityTriangles = calcCrossflowVelocityTriangles(head, flowRate, ratedRpm, runnerDiameter, crossflowDim!.runnerWidth)
+  }
+
   return {
     turbineType, turbinePower, generatorPower, specificSpeed,
     ratedRpm, poles, runawaySpeed, cavitationCoef, hsMax,
@@ -260,6 +341,7 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType): Turb
       crossflow: crossflowDim,
       tubular:   tubularDim,
     },
+    velocityTriangles,
     hydraulics: { gd2, waterHammerRise, waterHammerHead, penstock: { headLoss, headLossRatio } },
     electrical: { generatorKva, annualEnergy, annualEnergyGwh },
     checks,

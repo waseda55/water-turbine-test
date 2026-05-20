@@ -31,6 +31,26 @@ export type TurbineType =
 
 export type CheckResult = 'OK' | 'NG' | '注意' | 'N/A'
 
+// ---------- 速度三角形 ----------
+export interface VelocityTriangle {
+  /** 周速 u [m/s] */
+  u: number
+  /** 絶対速度 c [m/s] */
+  c: number
+  /** 相対速度 w [m/s] */
+  w: number
+  /** 絶対速度の流れ方向角 α [deg]（周方向基準） */
+  alpha: number
+  /** 相対速度の羽根角  β [deg]（周方向基準） */
+  beta: number
+  /** 絶対速度の周方向成分 cu [m/s] */
+  cu: number
+  /** 絶対速度の子午面成分（軸・半径方向）cm [m/s] */
+  cm: number
+  /** 相対速度の周方向成分 wu [m/s] */
+  wu: number
+}
+
 export interface TurbineResults {
   turbineType: TurbineType
   turbinePower: number      // 水車出力 Pw [kW]
@@ -104,6 +124,12 @@ export interface TurbineResults {
     } | null
   }
 
+  // ── 速度三角形 ──
+  velocityTriangles: {
+    inlet: VelocityTriangle
+    outlet: VelocityTriangle
+  } | null
+  
   // ── 水理・構造系 ──
   hydraulics: {
     gd2: number
