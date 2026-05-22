@@ -420,7 +420,7 @@ function SliderInput({ label, id, value, min, max, step, unit, dec = 1, onChange
 export default function DashboardClient({ user, initialCalculations, initialProjects, hqRanges, nsRanges }: Props) {
   const [inputs, setInputs] = useState<TurbineInputs>(DEFAULT_INPUTS)
   const [forcedType, setForcedType] = useState<TurbineType | null>(null)
-  const [results, setResults] = useState<TurbineResults>(() => calculate(DEFAULT_INPUTS))
+  const [results, setResults] = useState<TurbineResults>(() => calculate(DEFAULT_INPUTS, undefined, nsRanges))
   const [history, setHistory] = useState<HistoryRow[]>(initialCalculations)
   const [projects] = useState<ProjectRow[]>(initialProjects)
   const [saving, setSaving] = useState(false)
@@ -442,14 +442,14 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const update = useCallback((patch: Partial<TurbineInputs>) => {
     setInputs(prev => {
       const next = { ...prev, ...patch }
-      setResults(calculate(next, forcedType ?? undefined))
+      setResults(calculate(next, forcedType ?? undefined, nsRanges))
       return next
     })
   }, [forcedType])
 
   const handleForcedType = useCallback((type: TurbineType | null) => {
     setForcedType(type)
-    setInputs(prev => { setResults(calculate(prev, type ?? undefined)); return prev })
+    setInputs(prev => { setResults(calculate(prev, type ?? undefined, nsRanges)); return prev })
   }, [])
 
   const set = (key: keyof TurbineInputs) => (v: number) => update({ [key]: v })
@@ -507,7 +507,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
     setImportMsg(null)
     try {
       const payload = await importJSON(file)
-      setInputs(payload.inputs); setResults(calculate(payload.inputs, forcedType ?? undefined))
+      setInputs(payload.inputs); setResults(calculate(payload.inputs, forcedType ?? undefined, nsRanges))
       setImportMsg({ type: 'ok', text: `「${payload.caseName}」を読み込みました` })
     } catch (err) {
       setImportMsg({ type: 'err', text: err instanceof Error ? err.message : '読み込みエラー' })
@@ -528,7 +528,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
       capacityFactor: data.capacity_factor ?? 70,
       penstock: { length: data.penstock_length ?? 500, material: data.penstock_material ?? 'steel' },
     }
-    setInputs(restored); setResults(calculate(restored, forcedType ?? undefined))
+    setInputs(restored); setResults(calculate(restored, forcedType ?? undefined, nsRanges))
   }
 
   const fu = FLOW_UNITS.find(u => u.key === flowUnit)!
