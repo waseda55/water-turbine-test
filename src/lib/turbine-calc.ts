@@ -8,12 +8,14 @@ const PI  = Math.PI
 const MAX_POLE = 24		// 80 -> 24
 const MIN_POLE = 4		// 2 -> 4
 const NS_BASIS = 160		// 150 -> 160
+const MAX_NRPM = 1800		// 1500 -> 1800
+const MIN_NRPM = 250		// 100 -> 250
 
 function selectRatedSpeed(pw: number, head: number, freq: 50 | 60): { n: number; poles: number } {
   let bestN = 100, bestPoles = MIN_POLE, bestDiff = Infinity
   for (let p = MIN_POLE; p <= MAX_POLE; p += 2) {
     const n = 120 * freq / p
-    if (n < 100 || n > 1500) continue
+    if (n < MIN_NRPM || n > MAX_NRPM) continue
     const ns = n * Math.sqrt(pw) / Math.pow(head, 1.25)
     const diff = Math.abs(ns - NS_BASIS)
     if (diff < bestDiff) { bestDiff = diff; bestN = n; bestPoles = p }
@@ -106,12 +108,18 @@ function calcTubularDimensions(ns: number, flowRate: number, runnerDiameter: num
 // ── 自動形式選択 ───────────────────────────────────────────────
 // ※ クロスフロー水車は自動選定対象外（手動選択のみ）
 // ※ nsRanges が渡された場合はDB値を使用。なければフォールバック値で動作。
+// ※ turbine_types.is_active = false の形式は選定対象から除外される。
 function autoSelectType(
   head: number,
   flowRate: number,
   specificSpeed: number,
   nsRanges?: NsRange[],
 ): TurbineType {
+  // is_active な形式のみを対象にする
+  const isActive = (name: TurbineType) =>
+    nsRanges === undefined ||
+    nsRanges.some(r => r.turbineType.name === name && r.turbineType.isActive)
+
   const nsOf = (name: TurbineType) => nsRanges?.find(r => r.turbineType.name === name)
 
   const pelton  = nsOf('ペルトン水車')
@@ -123,14 +131,17 @@ function autoSelectType(
   const francisNsMax = francis?.nsMax ?? 400
   const tubularNsMin = tubular?.nsMin ?? 300
 
-  // チューブラ：超低落差（H≦20m）かつ大流量・高比速度
-  if (head <= 20 && flowRate >= 1.0 && specificSpeed >= tubularNsMin) return 'チューブラ水車'
-  // ペルトン：高落差（H>200m）または比速度がペルトン上限以下
-  if (head > 200 || specificSpeed < peltonNsMax) return 'ペルトン水車'
-  // フランシス：比速度がフランシス上限以下
-  if (specificSpeed <= francisNsMax) return 'フランシス水車'
-  // カプラン：それ以外（低落差・高比速度）
-  return 'カプラン水車'
+  // チューブラ：超低落差（H≦20m）かつ大流量・高比速度（is_active な場合のみ）
+  if (isActive('チューブラ水車') && head <= 20 && flowRate >= 1.0 && specificSpeed >= tubularNsMin) return 'チューブラ水車'
+  // ペルトン：高落差（H>200m）または比速度がペルトン上限以下（is_active な場合のみ）
+  if (isActive('ペルトン水車') && (head > 200 || specificSpeed < peltonNsMax)) return 'ペルトン水車'
+  // フランシス：比速度がフランシス上限以下（is_active な場合のみ）
+  if (isActive('フランシス水車') && specificSpeed <= francisNsMax) return 'フランシス水車'
+  // カプラン：それ以外（is_active な場合のみ）
+  if (isActive('カプラン水車')) return 'カプラン水車'
+  // すべてのアクティブ候補が外れた場合、is_active な最初の形式を返す
+  const fallback = nsRanges?.find(r => r.turbineType.isActive)
+  return (fallback?.turbineType.name ?? 'フランシス水車') as TurbineType
 }
 
 // ── 速度三角形ヘルパー ────────────────────────────────────────

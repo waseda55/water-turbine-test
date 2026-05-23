@@ -10,7 +10,7 @@ export async function fetchHQRanges(): Promise<HQRange[]> {
       id, turbine_type_id, boundary_points,
       h_min, h_max, q_min, q_max,
       source, note, version,
-      turbine_types ( id, name, icon, color, sort_order )
+      turbine_types ( id, name, icon, color, sort_order, is_active )
     `)
     .eq('is_active', true)
     .order('turbine_type_id')
@@ -27,6 +27,7 @@ export async function fetchHQRanges(): Promise<HQRange[]> {
       icon:      r.turbine_types.icon,
       color:     r.turbine_types.color,
       sortOrder: r.turbine_types.sort_order,
+      isActive:  r.turbine_types.is_active,
     },
     boundaryPoints: r.boundary_points as { q: number; h: number }[],
     hMin:    Number(r.h_min),
@@ -48,7 +49,7 @@ export async function fetchNsRanges(): Promise<NsRange[]> {
       id, turbine_type_id,
       ns_min, ns_max, overlap_note,
       source, note, version,
-      turbine_types ( id, name, icon, color, sort_order )
+      turbine_types ( id, name, icon, color, sort_order, is_active )
     `)
     .eq('is_active', true)
     .order('turbine_type_id')
@@ -65,6 +66,7 @@ export async function fetchNsRanges(): Promise<NsRange[]> {
       icon:      r.turbine_types.icon,
       color:     r.turbine_types.color,
       sortOrder: r.turbine_types.sort_order,
+      isActive:  r.turbine_types.is_active,
     },
     nsMin:       Number(r.ns_min),
     nsMax:       Number(r.ns_max),

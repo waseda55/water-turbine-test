@@ -573,7 +573,6 @@ export default function DashboardClient({ user, initialCalculations, initialProj
           </div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text)', lineHeight: 1.2 }}>水車選定ツール</div>
-            <div style={{ fontSize: 9, letterSpacing: '0.14em', color: 'var(--muted)', textTransform: 'uppercase' }}>HPP Design · 2026.05</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 12px', border: '1px solid var(--border)', background: 'var(--surface2)', marginLeft: 8 }}>
             <div style={{ width: 6, height: 6, background: typeColor, clipPath: 'polygon(50% 0%,100% 50%,50% 100%,0% 50%)' }} />
@@ -627,11 +626,15 @@ export default function DashboardClient({ user, initialCalculations, initialProj
               🔄 自動選択（推奨）
             </button>
             {([
-              { type: 'ペルトン水車'     as TurbineType, color: '#a78bfa', note: '高落差・低流量' },
-              { type: 'フランシス水車'   as TurbineType, color: '#38bdf8', note: '中落差・中流量' },
-              { type: 'カプラン水車'     as TurbineType, color: '#34d399', note: '低落差・大流量' },
-              { type: 'クロスフロー水車' as TurbineType, color: '#fb923c', note: '低〜中落差・小流量' },
-              { type: 'チューブラ水車'   as TurbineType, color: '#f472b6', note: '超低落差・大流量' },
+              // is_active な水車形式のみ表示（DBの turbine_types.is_active で制御）
+              ...nsRanges
+                .filter(r => r.turbineType.isActive)
+                .sort((a, b) => a.turbineType.sortOrder - b.turbineType.sortOrder)
+                .map(r => ({
+                  type: r.turbineType.name as TurbineType,
+                  color: r.turbineType.color,
+                  note: `Ns ${r.nsMin}〜${r.nsMax}`,
+                })),
             ]).map(({ type, color, note }) => (
               <button key={type} onClick={() => handleForcedType(type)}
                 style={{
@@ -706,12 +709,6 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                 </button>
               ))}
             </div>
-          </div>
-
-          <div style={{ marginTop: 16, padding: '10px 12px', border: '1px solid var(--border)', borderLeft: '2px solid var(--accent)', background: 'color-mix(in srgb, var(--accent) 4%, transparent)', fontSize: 10, color: 'var(--muted)', lineHeight: 1.7 }}>
-            <span style={{ color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.04em' }}>HPP Design</span>（45 Engineering, Italy）比較版<br />
-            主要静的項目は±3%以内で一致。動的項目の差はCFD相当の詳細計算によるものです。<br />
-            概略選定・比較検討用。詳細設計には製造者への確認が必要です。
           </div>
         </aside>
 

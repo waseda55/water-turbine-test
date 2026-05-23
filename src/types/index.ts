@@ -187,6 +187,7 @@ export interface TurbineTypeMaster {
   icon: string
   color: string
   sortOrder: number
+  isActive: boolean
 }
 
 export interface HQPoint { q: number; h: number }
