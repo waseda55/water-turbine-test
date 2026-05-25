@@ -95,6 +95,22 @@ export interface TurbineResults {
       flowAtRunaway: number
     } | null
 
+    // ── フランシス詳細設計（Pythonロジック移植） ──
+    francisDetail: {
+      // ランナベーン
+      D1: number; D5: number; D6: number; D2: number; D7: number
+      H2: number; B1: number; Vm1: number; Vm2: number
+      alpha1: number; beta1b: number; beta2b: number; lb: number | null
+      // ガイドベーン
+      Dg1: number; Dg2: number; Rg: number; Dlx: number; Bg1: number; Bg2: number
+      // ステーベーン
+      Ds1: number; Ds2: number; Bs1: number; Bs2: number
+      // ケーシング
+      Dc: number; lCa: number; Vc0: number
+      // ステーベーン流入角（16断面）
+      stayVaneAngles: Array<{ no: number; theta: number; Qn: number; Dcn: number; alpha: number }>
+    } | null
+
     // ── カプラン専用 ──
     kaplan: {
       numBlades: number

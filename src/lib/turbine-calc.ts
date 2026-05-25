@@ -211,6 +211,122 @@ function calcCrossflowVelocityTriangles(
   return { inlet, outlet }
 }
 
+// ── フランシス詳細設計パラメータ（Pythonロジック移植） ──────────
+const N11_FRANCIS = 62   // 単位速度
+
+function calcStayVaneAngle(Ds1: number, Bs1: number, th0: number, theta: number, Dcn: number): number {
+  const rs1  = Ds1 / 2
+  const rc   = Dcn / 2 + rs1
+  const rout = rc + Dcn / 2
+
+  const a = -1.0, b = 2.0 * rc, c = (Dcn / 2.0) ** 2 - rc ** 2
+
+  const dr = (rout - rs1) / 400.0
+  let q = 0.0
+  for (let j = 1; j <= 400; j++) {
+    const r1 = rs1 + dr * (j - 1)
+    const r2 = rs1 + dr * j
+    const p1 = Math.sqrt(Math.abs(a * r1 ** 2 + b * r1 + c)) / r1
+    const p2 = Math.sqrt(Math.abs(a * r2 ** 2 + b * r2 + c)) / r2
+    q += (p1 + p2) / 2.0 * dr
+  }
+
+  const qq0 = -1.0 / 360.0 * (theta + th0) + 1.0
+  const ccc = theta > 180.0 ? 1.0 : (180.0 - theta) / 180.0 * 0.1 + 1.0
+
+  const pp = 2.0 * q / (2.0 * PI * Bs1 * qq0) * ccc
+  return Math.atan(pp) * 180 / PI
+}
+
+function calcFrancisDetailedParams(
+  head: number, flowRate: number, etaT: number,
+  ratedRpm: number, specificSpeed: number,
+) {
+  const Nsp = specificSpeed
+  const N   = ratedRpm
+  const H   = head
+  const Q   = flowRate
+
+  // ── ランナベーン ──
+  const D1  = Math.sqrt(H) * N11_FRANCIS / N
+  const kD5 = 1.03182133046507e-5 * Nsp ** 2 - 0.00149034059141648 * Nsp + 1.05255248826807
+  const D5  = kD5 * D1
+  const D6  = 0.35 * D1
+  const kD2 = 3.27551062332804e-6 * Nsp ** 2 + 0.00306199513110902 * Nsp + 0.446611642813065
+  const D2  = kD2 * D1
+  const kD7 = -0.0004 * Nsp + 0.2513
+  const D7  = kD7 * D1
+  const kH2 = 0.000619426917040336 * Nsp + 0.0900487814835914
+  const H2  = kH2 * D1
+
+  const kcm1 = -1.99107329477917e-6 * Nsp ** 2 + 0.00147702607133364 * Nsp + 0.0365204129271132
+  const Vm1  = kcm1 * Math.sqrt(2 * G * H)
+  const B1   = Q / (PI * D1 * Vm1)
+
+  const Hth    = etaT * H
+  const U1     = PI * D1 * N / 60
+  const Vu1    = G * Hth / U1
+  const alpha1 = Math.atan2(Vm1, Vu1) * 180 / PI
+
+  const D_inlet  = Math.sqrt(D1 ** 2 + D5 ** 2) / 2
+  const U_inlet  = PI * D_inlet * N / 60
+  const Vu_inlet = G * Hth / U_inlet
+  const beta1b   = Math.atan2(Vm1, U_inlet - Vu_inlet) * 180 / PI
+
+  const D_outlet = Math.sqrt(D6 ** 2 + D7 ** 2) / 2
+  const U_outlet = PI * D_outlet * N / 60
+  const Vm2      = 4 * Q / (PI * (D2 ** 2 - D7 ** 2))
+  const beta2b   = Math.atan2(Vm2, U_outlet) * 180 / PI
+
+  const b1r = beta1b * PI / 180, b2r = beta2b * PI / 180
+  const tanRatio = Math.tan(b1r / 2) / Math.tan(b2r / 2)
+  const lb = tanRatio > 0 && (b2r - b1r) !== 0
+    ? (D_outlet - D_inlet) / (b2r - b1r) / 2 * Math.log(tanRatio)
+    : null
+
+  // ── ガイドベーン ──
+  const kDg1 = 1.2817934656e-5 * Nsp ** 2 - 0.001219602867175  * Nsp + 1.221638424287550
+  const Dg1  = kDg1 * D1
+  const kDg2 = 8.705950176e-6  * Nsp ** 2 - 0.001045312125451  * Nsp + 1.072765656988970
+  const Dg2  = kDg2 * D1
+  const Rg   = (Dg2 + (Dg1 - Dg2) * 0.42) / 2
+  const Dlx  = Rg - Dg2 / 2
+  const Bg1  = B1, Bg2 = B1
+
+  // ── ステーベーン ──
+  const kDs1 = 1.9762543999e-5 * Nsp ** 2 - 0.001766979265091 * Nsp + 1.458758687476440
+  const Ds1  = kDs1 * D1
+  const kDs2 = 1.3200375620e-5 * Nsp ** 2 - 0.001256058280413 * Nsp + 1.258329780057310
+  const Ds2  = kDs2 * D1
+  const Bs1  = B1, Bs2 = B1
+
+  // ── ケーシング ──
+  const kDc = 1.8311424841e-5 * Nsp ** 2 + 0.003334501174619 * Nsp + 0.130205609439768
+  const Dc  = kDc * D1
+  const lCa = 1.666191 * Dc
+  const Vc0 = 4 * Q / (PI * Dc ** 2)
+
+  // ── ステーベーン流入角（16断面） ──
+  const th0 = 21.03
+  const stayVaneAngles = Array.from({ length: 16 }, (_, i) => {
+    const no    = i + 1
+    const theta = no * 360 / 16
+    const Qn    = Q * (16 - no) / 16
+    const Dcn   = Math.sqrt(4.0 * Qn / (Vc0 * PI))
+    const alpha = calcStayVaneAngle(Ds1, Bs1, th0, theta, Dcn)
+    return { no, theta, Qn, Dcn, alpha }
+  })
+
+  return {
+    D1, D5, D6, D2, D7, H2, B1, Vm1, Vm2,
+    alpha1, beta1b, beta2b, lb,
+    Dg1, Dg2, Rg, Dlx, Bg1, Bg2,
+    Ds1, Ds2, Bs1, Bs2,
+    Dc, lCa, Vc0,
+    stayVaneAngles,
+  }
+}
+
 // ── メイン計算 ─────────────────────────────────────────────────
 export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRanges?: NsRange[]): TurbineResults {
   const { head, flowRate, turbineEff, generatorEff, suctionHead, altitude, frequency,
@@ -282,11 +398,12 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   const penstockVelocity  = 2.0
 
   // ── 形式別専用寸法 ──
-  const peltonDim    = turbineType === 'ペルトン水車'     ? calcPeltonDimensions(specificSpeed, head, flowRate, runnerDiameter)   : null
-  const francisDim   = turbineType === 'フランシス水車'   ? calcFrancisDimensions(specificSpeed, flowRate, runnerDiameter)        : null
-  const kaplanDim    = turbineType === 'カプラン水車'     ? calcKaplanDimensions(specificSpeed, flowRate, runnerDiameter)         : null
-  const crossflowDim = turbineType === 'クロスフロー水車' ? calcCrossflowDimensions(head, flowRate, runnerDiameter)              : null
-  const tubularDim   = turbineType === 'チューブラ水車'   ? calcTubularDimensions(specificSpeed, flowRate, runnerDiameter)       : null
+  const peltonDim      = turbineType === 'ペルトン水車'     ? calcPeltonDimensions(specificSpeed, head, flowRate, runnerDiameter)   : null
+  const francisDim     = turbineType === 'フランシス水車'   ? calcFrancisDimensions(specificSpeed, flowRate, runnerDiameter)        : null
+  const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, etaT, ratedRpm, specificSpeed) : null
+  const kaplanDim      = turbineType === 'カプラン水車'     ? calcKaplanDimensions(specificSpeed, flowRate, runnerDiameter)         : null
+  const crossflowDim   = turbineType === 'クロスフロー水車' ? calcCrossflowDimensions(head, flowRate, runnerDiameter)              : null
+  const tubularDim     = turbineType === 'チューブラ水車'   ? calcTubularDimensions(specificSpeed, flowRate, runnerDiameter)       : null
 
   // ── 水理・構造 ──
   const Ta  = 8.0
@@ -362,11 +479,12 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
     dimensions: {
       runnerDiameter, draftTubeDiameter, casingDiameter,
       penstockDiameter, penstockVelocity,
-      pelton:    peltonDim,
-      francis:   francisDim,
-      kaplan:    kaplanDim,
-      crossflow: crossflowDim,
-      tubular:   tubularDim,
+      pelton:        peltonDim,
+      francis:       francisDim,
+      francisDetail: francisDetail,
+      kaplan:        kaplanDim,
+      crossflow:     crossflowDim,
+      tubular:       tubularDim,
     },
     velocityTriangles,
     hydraulics: { gd2, waterHammerRise, waterHammerHead, penstock: { headLoss, headLossRatio } },

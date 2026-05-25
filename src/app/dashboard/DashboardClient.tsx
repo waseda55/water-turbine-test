@@ -433,7 +433,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const [importMsg, setImportMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [sidebarTab, setSidebarTab] = useState<'history' | 'projects'>('history')
-  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity'>('result')
+  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity' | 'francis_detail'>('result')
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [flowUnit, setFlowUnit] = useState<FlowUnit>('m3/s')
   const router = useRouter()
@@ -718,6 +718,12 @@ export default function DashboardClient({ user, initialCalculations, initialProj
 	{([{ id: 'result', label: '計算結果' }, { id: 'hq', label: 'H-Q 選定図' }, { id: 'ns', label: 'Ns 分布図' }, { id: 'schematic', label: '📐 概略図' }, { id: 'velocity', label: '🔺 速度三角形' }] as const).map(tab => (
               <button key={tab.id} onClick={() => setMainTab(tab.id)} className={`tab ${mainTab === tab.id ? 'active' : ''}`}>{tab.label}</button>
             ))}
+            {results.turbineType === 'フランシス水車' && (
+              <button onClick={() => setMainTab('francis_detail')} className={`tab ${mainTab === 'francis_detail' ? 'active' : ''}`}
+                style={{ color: mainTab === 'francis_detail' ? '#38bdf8' : undefined }}>
+                🔩 詳細設計
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto" style={{ padding: 16 }}>
@@ -1106,6 +1112,129 @@ export default function DashboardClient({ user, initialCalculations, initialProj
             {mainTab === 'velocity' && (
               <VelocityTrianglePanel results={results} color={typeColor} />
             )}
+
+            {/* ══ TAB: フランシス詳細設計 ══ */}
+            {mainTab === 'francis_detail' && results.dimensions.francisDetail && (() => {
+              const d = results.dimensions.francisDetail
+              const mm = (v: number) => `${(v * 1000).toFixed(1)} mm`
+              const ms = (v: number) => `${v.toFixed(3)} m/s`
+              const deg = (v: number) => `${v.toFixed(2)} °`
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* ランナベーン */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🔄 ランナベーン</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['入口径（クラウン側）D₁',  mm(d.D1)],
+                        ['入口径（バンド側）  D₅',  mm(d.D5)],
+                        ['出口径（クラウン側）D₆',  mm(d.D6)],
+                        ['出口径（バンド側）  D₂',  mm(d.D2)],
+                        ['ボス径             D₇',  mm(d.D7)],
+                        ['出口高さ           H₂',  mm(d.H2)],
+                        ['入口羽根高さ        B₁',  mm(d.B1)],
+                        ['入口流速（子午面）Vm₁',   ms(d.Vm1)],
+                        ['出口流速（子午面）Vm₂',   ms(d.Vm2)],
+                        ['入口絶対角度       α₁',  deg(d.alpha1)],
+                        ['入口相対羽根角度  β₁b',  deg(d.beta1b)],
+                        ['出口相対羽根角度  β₂b',  deg(d.beta2b)],
+                        ['羽根長さ            l',   d.lb != null ? mm(Math.abs(d.lb)) : '— (要確認)'],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ガイドベーン */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🔧 ガイドベーン</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['外径              Dg₁', mm(d.Dg1)],
+                        ['内径              Dg₂', mm(d.Dg2)],
+                        ['ピッチ円半径       Rg',  `${(d.Rg * 1000).toFixed(1)} mm`],
+                        ['ピッチ円→出口距離 Dlx', `${(d.Dlx * 1000).toFixed(1)} mm`],
+                        ['入口羽根高さ      Bg₁',  mm(d.Bg1)],
+                        ['出口羽根高さ      Bg₂',  mm(d.Bg2)],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ステーベーン */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🏗 ステーベーン</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['入口径  Ds₁', mm(d.Ds1)],
+                        ['出口径  Ds₂', mm(d.Ds2)],
+                        ['入口高さ Bs₁', mm(d.Bs1)],
+                        ['出口高さ Bs₂', mm(d.Bs2)],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ケーシング */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🌀 スパイラルケーシング</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['入口径         Dc',  mm(d.Dc)],
+                        ['アプローチ長さ lCa', mm(d.lCa)],
+                        ['入口流速       Vc₀', ms(d.Vc0)],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ステーベーン流入角 16断面 */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">📐 ステーベーン流入角（16断面）</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10 }}>
+                      巻き始め角 th₀ = 21.03°　/ 分割数 = 16
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                            {['#', 'θ [°]', 'Qn [m³/s]', 'Dcn [mm]', 'α [°]'].map(h => (
+                              <th key={h} style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {d.stayVaneAngles.map(r => (
+                            <tr key={r.no} style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 50%, transparent)' }}>
+                              <td style={{ padding: '5px 10px', textAlign: 'right', color: 'var(--accent)' }}>{r.no}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right' }}>{r.theta.toFixed(1)}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right' }}>{r.Qn.toFixed(4)}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right' }}>{(r.Dcn * 1000).toFixed(1)}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right', color: '#38bdf8', fontWeight: 600 }}>{r.alpha.toFixed(3)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </main>
 
