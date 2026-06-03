@@ -19,6 +19,7 @@ export interface TurbineInputs {
     length: number      // 導水管延長 [m]
     material: 'steel' | 'ductile' | 'frp' // 管種
   }
+  targetNs: number      // 目標比速度 Ns（回転数選定の基準）
 }
 
 // ---------- 計算結果 ----------
@@ -101,12 +102,21 @@ export interface TurbineResults {
       D1: number; D5: number; D6: number; D2: number; D7: number
       H2: number; B1: number; Vm1: number; Vm2: number
       alpha1: number; beta1b: number; beta2b: number; lb: number | null
+      Zr: number; t1: number; t2: number
       // ガイドベーン
       Dg1: number; Dg2: number; Rg: number; Dlx: number; Bg1: number; Bg2: number
+      Zg: number; tg1: number; tg2: number; lg: number; P00: number
+      guideVaneTable: Array<{ op: number; port: number; alphaG1b: number; alphaG2b: number; delta: number; alphaG02: number }>
       // ステーベーン
       Ds1: number; Ds2: number; Bs1: number; Bs2: number
+      Zs: number; ts1: number; ts2: number; ls: number
+      alphaS1b: number; alphaS2b: number
       // ケーシング
       Dc: number; lCa: number; Vc0: number
+      // ドラフトチューブ
+      ldc: number; rdc1: number; rdc2: number; rdb: number; bdb: number; hdb2: number; ldd: number; bdd: number; hdd: number
+      // シール
+      seal: number; bw_1: number; bw_2: number; lw_1: number; lw_2: number; rl_1: number; rl_2: number
       // ステーベーン流入角（16断面）
       stayVaneAngles: Array<{ no: number; theta: number; Qn: number; Dcn: number; alpha: number }>
     } | null

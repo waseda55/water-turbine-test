@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { calculate, getEfficiencyCurve } from '@/lib/turbine-calc'
+import { calculate, getEfficiencyCurve, getHillChartData } from '@/lib/turbine-calc'
 import { exportJSON, exportCSV, exportExcel, exportDXF, importJSON } from '@/lib/export'
 import type { TurbineInputs, TurbineResults, TurbineType, HQRange, NsRange } from '@/types'
 import { useRouter } from 'next/navigation'
@@ -11,6 +11,10 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import TurbineSchematic from './components/TurbineSchematic'
+import { FrancisMeridionalSvg } from './components/FrancisMeridionalSvg'
+import { FrancisBladeProfileSvg } from './components/FrancisBladeProfileSvg'
+import { FrancisRunner3D } from './components/FrancisRunner3D'
+import { FrancisBlade3D }  from './components/FrancisBlade3D'
 
 // ─── 型 ────────────────────────────────────────────────────────
 interface HistoryRow {
@@ -51,6 +55,7 @@ const DEFAULT_INPUTS: TurbineInputs = {
   suctionHead: 2, altitude: 0, frequency: 50,
   powerFactor: 0.85, operatingHours: 8000, capacityFactor: 70,
   penstock: { length: 500, material: 'steel' },
+  targetNs: 160,
 }
 
 import type { VelocityTriangle } from '@/types'
@@ -433,7 +438,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const [importMsg, setImportMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [sidebarTab, setSidebarTab] = useState<'history' | 'projects'>('history')
-  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity' | 'francis_detail'>('result')
+  const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity' | 'francis_detail' | 'hill_chart'>('result')
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [flowUnit, setFlowUnit] = useState<FlowUnit>('m3/s')
   const router = useRouter()
@@ -527,6 +532,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
       powerFactor: data.power_factor ?? 0.85, operatingHours: data.operating_hours ?? 8000,
       capacityFactor: data.capacity_factor ?? 70,
       penstock: { length: data.penstock_length ?? 500, material: data.penstock_material ?? 'steel' },
+      targetNs: data.target_ns ?? 160,
     }
     setInputs(restored); setResults(calculate(restored, forcedType ?? undefined, nsRanges))
   }
@@ -662,6 +668,9 @@ export default function DashboardClient({ user, initialCalculations, initialProj
           <SliderInput label="水車効率（η_t）"   id="eta_t" value={inputs.turbineEff}   min={70}  max={95}   step={0.1} unit="%" dec={1} onChange={set('turbineEff')} />
           <SliderInput label="発電機効率（η_g）" id="eta_g" value={inputs.generatorEff} min={90}  max={99}   step={0.1} unit="%" dec={1} onChange={set('generatorEff')} />
 
+          <div className="sec-hd" style={{ marginTop: 16 }}>回転数選定</div>
+          <SliderInput label="目標比速度（Ns_target）" id="targetNs" value={inputs.targetNs} min={50} max={500} step={5} unit="" dec={0} onChange={v => update({ targetNs: v })} />
+
           <div className="sec-hd" style={{ marginTop: 16 }}>設置条件</div>
           <SliderInput label="吸出し高さ（Hs）" id="Hs"  value={inputs.suctionHead} min={-5} max={15}   step={0.1} unit="m" dec={1} onChange={set('suctionHead')} />
           <SliderInput label="設置標高"          id="alt" value={inputs.altitude}    min={0}  max={3000} step={10}  unit="m" dec={0} onChange={set('altitude')} />
@@ -722,6 +731,12 @@ export default function DashboardClient({ user, initialCalculations, initialProj
               <button onClick={() => setMainTab('francis_detail')} className={`tab ${mainTab === 'francis_detail' ? 'active' : ''}`}
                 style={{ color: mainTab === 'francis_detail' ? '#38bdf8' : undefined }}>
                 🔩 詳細設計
+              </button>
+            )}
+            {results.turbineType === 'フランシス水車' && (
+              <button onClick={() => setMainTab('hill_chart')} className={`tab ${mainTab === 'hill_chart' ? 'active' : ''}`}
+                style={{ color: mainTab === 'hill_chart' ? '#38bdf8' : undefined }}>
+                📈 性能曲線
               </button>
             )}
           </div>
@@ -958,6 +973,79 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                   </ResponsiveContainer>
                 </div>
 
+                {/* ── フランシス水車 子午面断面図 ── */}
+                {results.dimensions.francisDetail && (
+                  <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
+                    <div className="sec-hd">フランシス水車　ランナー子午面断面図</div>
+                    <div style={{ width: '100%', aspectRatio: '14/11', maxHeight: 460 }}>
+                      <FrancisMeridionalSvg results={results} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10, fontSize: 10, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[
+                        ['D1 入口クラウン径', `${(results.dimensions.francisDetail.D1 * 1000).toFixed(1)} mm`],
+                        ['D5 入口バンド径',   `${(results.dimensions.francisDetail.D5 * 1000).toFixed(1)} mm`],
+                        ['D6 出口クラウン径', `${(results.dimensions.francisDetail.D6 * 1000).toFixed(1)} mm`],
+                        ['D2 出口バンド径',   `${(results.dimensions.francisDetail.D2 * 1000).toFixed(1)} mm`],
+                        ['D7 ボス径',         `${(results.dimensions.francisDetail.D7 * 1000).toFixed(1)} mm`],
+                        ['B1 入口羽根高さ',   `${(results.dimensions.francisDetail.B1 * 1000).toFixed(1)} mm`],
+                        ['H2 出口高さ',       `${(results.dimensions.francisDetail.H2 * 1000).toFixed(1)} mm`],
+                        ['β1b 入口羽根角',   `${results.dimensions.francisDetail.beta1b.toFixed(1)} °`],
+                      ].map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── フランシス水車 ランナーベーン翼断面図 ── */}
+                {results.dimensions.francisDetail && (
+                  <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
+                    <div className="sec-hd">フランシス水車　ランナーベーン翼断面図</div>
+                    <div style={{ width: '100%', aspectRatio: '16/10', maxHeight: 400 }}>
+                      <FrancisBladeProfileSvg results={results} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10, fontSize: 10, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
+                      {[
+                        ['β1b 入口羽根角',  `${results.dimensions.francisDetail.beta1b.toFixed(2)} °`],
+                        ['β2b 出口羽根角',  `${results.dimensions.francisDetail.beta2b.toFixed(2)} °`],
+                        ['lb 羽根長さ',     results.dimensions.francisDetail.lb != null ? `${(Math.abs(results.dimensions.francisDetail.lb) * 1000).toFixed(1)} mm` : '—'],
+                        ['Ns 比速度',       `${results.specificSpeed.toFixed(1)}`],
+                        ['Vm1 入口子午速度', `${results.dimensions.francisDetail.Vm1.toFixed(2)} m/s`],
+                        ['Vm2 出口子午速度', `${results.dimensions.francisDetail.Vm2.toFixed(2)} m/s`],
+                        ['α1 入口絶対角',   `${results.dimensions.francisDetail.alpha1.toFixed(1)} °`],
+                        ['n 定格回転速度',  `${Math.round(results.ratedRpm)} rpm`],
+                      ].map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 10, padding: '7px 10px', background: 'color-mix(in srgb, var(--accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)', fontSize: 10, color: 'var(--muted)', lineHeight: 1.7 }}>
+                      ※ 翼型はNACA 4桁系プロファイルを基に、比速度 Ns に応じて翼厚比（t/c）を自動調整しています。キャンバーラインは入口・出口の羽根角（β1b・β2b）を端部接線条件として円弧近似で生成しています。
+                    </div>
+                  </div>
+                )}
+
+                {/* ── フランシス水車 ランナー 3Dビュー ── */}
+                {results.dimensions.francisDetail && (
+                  <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
+                    <div className="sec-hd">フランシス水車　ランナー 3Dビュー</div>
+                    <FrancisRunner3D results={results} />
+                  </div>
+                )}
+
+                {/* ── フランシス水車 ランナーベーン単体 3Dビュー ── */}
+                {results.dimensions.francisDetail && (
+                  <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
+                    <div className="sec-hd">フランシス水車　ランナーベーン単体 3Dビュー</div>
+                    <FrancisBlade3D results={results} />
+                  </div>
+                )}
+
                 <div className="panel" style={{ padding: 14 }}>
                   <div className="sec-hd">詳細計算値</div>
                   <div style={{ overflowY: 'auto', maxHeight: 220 }}>
@@ -1138,6 +1226,9 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                         ['入口絶対角度       α₁',  deg(d.alpha1)],
                         ['入口相対羽根角度  β₁b',  deg(d.beta1b)],
                         ['出口相対羽根角度  β₂b',  deg(d.beta2b)],
+                        ['羽根枚数           Zr',  `${d.Zr} 枚`],
+                        ['入口羽根厚さ        t₁',  `${(d.t1 * 1000).toFixed(2)} mm`],
+                        ['出口羽根厚さ        t₂',  `${(d.t2 * 1000).toFixed(2)} mm`],
                         ['羽根長さ            l',   d.lb != null ? mm(Math.abs(d.lb)) : '— (要確認)'],
                       ] as [string, string][]).map(([label, val]) => (
                         <div key={label} className="data-row">
@@ -1153,12 +1244,17 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                     <div className="sec-hd">🔧 ガイドベーン</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
                       {([
+                        ['枚数              Zg',  `${d.Zg} 枚`],
                         ['外径              Dg₁', mm(d.Dg1)],
                         ['内径              Dg₂', mm(d.Dg2)],
                         ['ピッチ円半径       Rg',  `${(d.Rg * 1000).toFixed(1)} mm`],
                         ['ピッチ円→出口距離 Dlx', `${(d.Dlx * 1000).toFixed(1)} mm`],
                         ['入口羽根高さ      Bg₁',  mm(d.Bg1)],
                         ['出口羽根高さ      Bg₂',  mm(d.Bg2)],
+                        ['入口厚さ          tg₁', `${(d.tg1 * 1000).toFixed(2)} mm`],
+                        ['出口厚さ          tg₂', `${(d.tg2 * 1000).toFixed(2)} mm`],
+                        ['羽根長さ           lg', mm(d.lg)],
+                        ['最大ポート幅      P00', mm(d.P00)],
                       ] as [string, string][]).map(([label, val]) => (
                         <div key={label} className="data-row">
                           <span className="data-row-label">{label}</span>
@@ -1168,15 +1264,52 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                     </div>
                   </div>
 
+                  {/* ガイドベーン角度テーブル */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">📐 ガイドベーン角度（各開度）</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10 }}>
+                      設計開度 80% / 出口角 α₁={d.alpha1.toFixed(2)}°
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                            {['開度[%]', 'ポート[mm]', 'αG1b[°]', 'αG2b[°]', 'δ[°]', 'αG02[°]'].map(h => (
+                              <th key={h} style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {d.guideVaneTable.map(r => (
+                            <tr key={r.op} style={{ borderBottom: '1px solid color-mix(in srgb, var(--border) 50%, transparent)', background: r.op === 80 ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : undefined }}>
+                              <td style={{ padding: '5px 8px', textAlign: 'right', color: r.op === 80 ? 'var(--accent)' : undefined, fontWeight: r.op === 80 ? 700 : undefined }}>{r.op}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{(r.port * 1000).toFixed(1)}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{r.alphaG1b.toFixed(3)}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{r.alphaG2b.toFixed(3)}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right' }}>{r.delta.toFixed(3)}</td>
+                              <td style={{ padding: '5px 8px', textAlign: 'right', color: '#38bdf8', fontWeight: 600 }}>{r.alphaG02.toFixed(3)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   {/* ステーベーン */}
                   <div className="panel" style={{ padding: 14 }}>
                     <div className="sec-hd">🏗 ステーベーン</div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
                       {([
-                        ['入口径  Ds₁', mm(d.Ds1)],
-                        ['出口径  Ds₂', mm(d.Ds2)],
-                        ['入口高さ Bs₁', mm(d.Bs1)],
-                        ['出口高さ Bs₂', mm(d.Bs2)],
+                        ['枚数              Zs', `${d.Zs} 枚`],
+                        ['入口径           Ds₁', mm(d.Ds1)],
+                        ['出口径           Ds₂', mm(d.Ds2)],
+                        ['入口高さ          Bs₁', mm(d.Bs1)],
+                        ['出口高さ          Bs₂', mm(d.Bs2)],
+                        ['入口厚さ          ts₁', `${(d.ts1 * 1000).toFixed(2)} mm`],
+                        ['出口厚さ          ts₂', `${(d.ts2 * 1000).toFixed(2)} mm`],
+                        ['羽根長さ           ls', mm(Math.abs(d.ls))],
+                        ['入口角度        αS₁b', deg(d.alphaS1b)],
+                        ['出口角度        αS₂b', deg(d.alphaS2b)],
                       ] as [string, string][]).map(([label, val]) => (
                         <div key={label} className="data-row">
                           <span className="data-row-label">{label}</span>
@@ -1194,6 +1327,50 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                         ['入口径         Dc',  mm(d.Dc)],
                         ['アプローチ長さ lCa', mm(d.lCa)],
                         ['入口流速       Vc₀', ms(d.Vc0)],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ドラフトチューブ */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🌊 ドラフトチューブ</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['入口円筒部長さ    ldc',  mm(d.ldc)],
+                        ['入口円筒入口半径 rdc₁',  mm(d.rdc1)],
+                        ['入口円筒出口半径 rdc₂',  mm(d.rdc2)],
+                        ['曲がり部半径      rdb',  mm(d.rdb)],
+                        ['曲がり部出口幅    bdb',  mm(d.bdb)],
+                        ['曲がり部出口高さ hdb₂',  mm(d.hdb2)],
+                        ['ディフューザ長さ   ldd',  mm(d.ldd)],
+                        ['ディフューザ出口幅 bdd',  mm(d.bdd)],
+                        ['ディフューザ出口高 hdd',  mm(d.hdd)],
+                      ] as [string, string][]).map(([label, val]) => (
+                        <div key={label} className="data-row">
+                          <span className="data-row-label">{label}</span>
+                          <span className="data-row-val">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ランナーシール */}
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🔒 ランナーシール</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+                      {([
+                        ['シール数',                    `${d.seal}`],
+                        ['ギャップ幅（クラウン）bw₁',  `${(d.bw_1 * 1000).toFixed(2)} mm`],
+                        ['ギャップ幅（バンド）  bw₂',  `${(d.bw_2 * 1000).toFixed(2)} mm`],
+                        ['シール長さ（クラウン）lw₁',  `${(d.lw_1 * 1000).toFixed(0)} mm`],
+                        ['シール長さ（バンド）  lw₂',  `${(d.lw_2 * 1000).toFixed(0)} mm`],
+                        ['シール半径（クラウン）rl₁',  `${(d.rl_1 * 1000).toFixed(1)} mm`],
+                        ['シール半径（バンド）  rl₂',  `${(d.rl_2 * 1000).toFixed(1)} mm`],
                       ] as [string, string][]).map(([label, val]) => (
                         <div key={label} className="data-row">
                           <span className="data-row-label">{label}</span>
@@ -1230,6 +1407,108 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+            {/* ── TAB: 性能曲線（ヒルチャート） ── */}
+            {mainTab === 'hill_chart' && results.turbineType === 'フランシス水車' && (() => {
+              const hillData = getHillChartData(results.turbineType, inputs.turbineEff / 100)
+              if (!hillData) return <div style={{ padding: 20, color: 'var(--muted)' }}>データなし</div>
+
+              const { points, designPoint, axes } = hillData
+              const svgW = 520, svgH = 360
+              const marginL = 52, marginR = 20, marginT = 20, marginB = 44
+              const plotW = svgW - marginL - marginR
+              const plotH = svgH - marginT - marginB
+
+              const toX = (n11: number) => marginL + (n11 - axes.N11.min) / (axes.N11.max - axes.N11.min) * plotW
+              const toY = (q11: number) => marginT + plotH - (q11 - axes.Q11.min) / (axes.Q11.max - axes.Q11.min) * plotH
+
+              const colorForEta = (eta: number) => {
+                const maxEta = designPoint.eta
+                const t = Math.max(0, Math.min(1, (eta - 40) / (maxEta - 40)))
+                const r = Math.round(t * 255)
+                const g = Math.round(100 + t * 100)
+                const b = Math.round(255 - t * 255)
+                return `rgb(${r},${g},${b})`
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">🗺 ヒルチャート（N₁₁ – Q₁₁ – η 性能曲線）</div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10 }}>
+                      単位速度 N₁₁ vs 単位流量 Q₁₁ の等効率線図（経験式による近似）
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <svg width={svgW} height={svgH} style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                        {Array.from({ length: 6 }, (_, i) => {
+                          const n11 = axes.N11.min + (axes.N11.max - axes.N11.min) * i / 5
+                          const x = toX(n11)
+                          return (
+                            <g key={`n${i}`}>
+                              <line x1={x} y1={marginT} x2={x} y2={marginT + plotH} stroke="var(--border)" strokeWidth={0.5} />
+                              <text x={x} y={svgH - 6} textAnchor="middle" fill="var(--muted)" fontSize={9}>{n11.toFixed(0)}</text>
+                            </g>
+                          )
+                        })}
+                        {Array.from({ length: 6 }, (_, i) => {
+                          const q11 = axes.Q11.min + (axes.Q11.max - axes.Q11.min) * i / 5
+                          const y = toY(q11)
+                          return (
+                            <g key={`q${i}`}>
+                              <line x1={marginL} y1={y} x2={marginL + plotW} y2={y} stroke="var(--border)" strokeWidth={0.5} />
+                              <text x={marginL - 4} y={y + 3} textAnchor="end" fill="var(--muted)" fontSize={9}>{q11.toFixed(3)}</text>
+                            </g>
+                          )
+                        })}
+                        {points.map((p, idx) => (
+                          <circle key={idx} cx={toX(p.N11)} cy={toY(p.Q11)} r={4}
+                            fill={colorForEta(p.eta)} opacity={0.75} />
+                        ))}
+                        {[50, 60, 70, 75, 80, 85, 88, 90, 92].map(level => {
+                          const closest = points.reduce((best, p) =>
+                            Math.abs(p.eta - level) < Math.abs(best.eta - level) ? p : best, points[0])
+                          if (!closest || Math.abs(closest.eta - level) > 3) return null
+                          return (
+                            <text key={level} x={toX(closest.N11)} y={toY(closest.Q11) - 6}
+                              textAnchor="middle" fill="white" fontSize={8} fontWeight={600}>
+                              {level}%
+                            </text>
+                          )
+                        })}
+                        <circle cx={toX(designPoint.N11)} cy={toY(designPoint.Q11)} r={7}
+                          fill="none" stroke="#38bdf8" strokeWidth={2} />
+                        <line x1={toX(designPoint.N11) - 10} y1={toY(designPoint.Q11)}
+                              x2={toX(designPoint.N11) + 10} y2={toY(designPoint.Q11)}
+                              stroke="#38bdf8" strokeWidth={1.5} />
+                        <line x1={toX(designPoint.N11)} y1={toY(designPoint.Q11) - 10}
+                              x2={toX(designPoint.N11)} y2={toY(designPoint.Q11) + 10}
+                              stroke="#38bdf8" strokeWidth={1.5} />
+                        <text x={toX(designPoint.N11) + 10} y={toY(designPoint.Q11) - 6}
+                          fill="#38bdf8" fontSize={9} fontWeight={700}>
+                          設計点 η={designPoint.eta.toFixed(1)}%
+                        </text>
+                        <text x={marginL + plotW / 2} y={svgH - 2} textAnchor="middle" fill="var(--text)" fontSize={10}>
+                          単位速度 N₁₁ [rpm·m⁰·⁵]
+                        </text>
+                        <text transform={`rotate(-90,14,${marginT + plotH / 2})`} x={14} y={marginT + plotH / 2}
+                          textAnchor="middle" fill="var(--text)" fontSize={10}>
+                          単位流量 Q₁₁ [m³/s·m⁰·⁵]
+                        </text>
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="panel" style={{ padding: 14 }}>
+                    <div className="sec-hd">凡例</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ background: 'linear-gradient(to right, rgb(0,100,255), rgb(0,200,100), rgb(255,200,0))', width: 200, height: 14, border: '1px solid var(--border)' }} />
+                      <span style={{ fontSize: 10, color: 'var(--muted)' }}>低効率 → 高効率</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+                      ⚠ 表示は経験式による近似値です。実際の性能曲線はメーカー試験データを使用してください。
                     </div>
                   </div>
                 </div>

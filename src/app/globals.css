@@ -7,47 +7,47 @@
 @layer base {
   :root {
     color-scheme: light;
-    --bg:       #f0f2f7;
-    --surface:  #ffffff;
-    --surface2: #e8ecf4;
-    --border:   #c5cfe0;
-    --text:     #0d1422;
-    --muted:    #566880;
-    --accent:   #0057d9;
-    --accent2:  #0040a8;
-    --ok:       #0a8a4a;
-    --warn:     #c56c00;
-    --ng:       #c42020;
+    --bg:       #fdf6ec;
+    --surface:  #fffbf4;
+    --surface2: #f5ead8;
+    --border:   #d9bc8a;
+    --text:     #2c1a06;
+    --muted:    #7a5a30;
+    --accent:   #c47a00;
+    --accent2:  #9a5f00;
+    --ok:       #2d7a3a;
+    --warn:     #b85c00;
+    --ng:       #b52020;
   }
 
   .dark {
     color-scheme: dark;
-    --bg:       #060a12;
-    --surface:  #0c1120;
-    --surface2: #111827;
-    --border:   #1c2d45;
-    --text:     #dce8f8;
-    --muted:    #6888a8;
-    --accent:   #2d8cff;
-    --accent2:  #0057d9;
-    --ok:       #10d06c;
-    --warn:     #f0a030;
-    --ng:       #f04040;
+    --bg:       #1c1408;
+    --surface:  #2a1f0e;
+    --surface2: #362815;
+    --border:   #7a5220;
+    --text:     #fff8ed;
+    --muted:    #b8915a;
+    --accent:   #f59e0b;
+    --accent2:  #d97706;
+    --ok:       #6ee7b7;
+    --warn:     #fcd34d;
+    --ng:       #fca5a5;
   }
 
   .light {
     color-scheme: light;
-    --bg:       #f0f2f7;
-    --surface:  #ffffff;
-    --surface2: #e8ecf4;
-    --border:   #c5cfe0;
-    --text:     #0d1422;
-    --muted:    #566880;
-    --accent:   #0057d9;
-    --accent2:  #0040a8;
-    --ok:       #0a8a4a;
-    --warn:     #c56c00;
-    --ng:       #c42020;
+    --bg:       #fdf6ec;
+    --surface:  #fffbf4;
+    --surface2: #f5ead8;
+    --border:   #d9bc8a;
+    --text:     #2c1a06;
+    --muted:    #7a5a30;
+    --accent:   #c47a00;
+    --accent2:  #9a5f00;
+    --ok:       #2d7a3a;
+    --warn:     #b85c00;
+    --ng:       #b52020;
   }
 
   * { box-sizing: border-box; }
@@ -59,7 +59,7 @@
     font-size: 14px;
     transition: background-color 0.25s, color 0.25s;
     /* Fine dot-grid background */
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
     background-size: 28px 28px;
     background-attachment: fixed;
   }
