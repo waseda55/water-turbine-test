@@ -11,8 +11,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import TurbineSchematic from './components/TurbineSchematic'
-import { FrancisMeridionalSvg } from './components/FrancisMeridionalSvg'
-import { FrancisBladeProfileSvg } from './components/FrancisBladeProfileSvg'
+import { FrancisMeridional } from './components/FrancisMeridional'
+import { FrancisBladeProfile } from './components/FrancisBladeProfile'
 import { FrancisRunner3D } from './components/FrancisRunner3D'
 import { FrancisBlade3D }  from './components/FrancisBlade3D'
 
@@ -770,7 +770,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                     { label: '比速度 Ns',    val: results.specificSpeed.toFixed(1),  unit: 'm·kW' },
                     { label: '定格回転速度', val: Math.round(results.ratedRpm),      unit: 'rpm' },
                     { label: '極数',         val: results.poles,                     unit: 'P' },
-                    { label: '暴走速度',     val: Math.round(results.runawaySpeed),  unit: 'rpm' },
+                    { label: '無拘束速度',     val: Math.round(results.runawaySpeed),  unit: 'rpm' },
                   ].map(k => (
                     <div key={k.label} className="kpi-tile">
                       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)', lineHeight: 1.15 }}>{k.val}</div>
@@ -784,7 +784,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                     { label: 'キャビテーション', ...results.checks.cavitation },
                     { label: '比速度の妥当性',   ...results.checks.specificSpeed },
                     { label: '標高・大気圧低下', ...results.checks.altitude },
-                    { label: '暴走速度',         result: 'INFO', message: results.checks.runaway.message },
+                    { label: '無拘束速度',         result: 'INFO', message: results.checks.runaway.message },
                   ].map(c => (
                     <div key={c.label} style={{ border: '1px solid var(--border)', background: 'var(--surface2)', padding: '8px 10px', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                       <Badge result={c.result} />
@@ -840,7 +840,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                       ['ランナーブレード数', `${results.dimensions.francis.numBlades} 枚`],
                       ['ガイドベーン数', `${results.dimensions.francis.numGuideVanes} 枚`],
                       ['最小流量 Qmin', `${(results.dimensions.francis.minFlow * 1000).toFixed(1)} l/s`],
-                      ['暴走時流量 Qr', `${(results.dimensions.francis.flowAtRunaway * 1000).toFixed(1)} l/s`],
+                      ['無拘束時流量 Qr', `${(results.dimensions.francis.flowAtRunaway * 1000).toFixed(1)} l/s`],
                     ].map(([label, val]) => (
                       <div key={label} className="data-row"><span className="data-row-label">{label}</span><span className="data-row-val">{val}</span></div>
                     ))}
@@ -977,8 +977,8 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                 {results.dimensions.francisDetail && (
                   <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
                     <div className="sec-hd">フランシス水車　ランナー子午面断面図</div>
-                    <div style={{ width: '100%', aspectRatio: '14/11', maxHeight: 460 }}>
-                      <FrancisMeridionalSvg results={results} />
+                    <div style={{ width: '100%' }}>
+                      <FrancisMeridional results={results} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10, fontSize: 10, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {[
@@ -1004,8 +1004,8 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                 {results.dimensions.francisDetail && (
                   <div className="panel" style={{ padding: 14, gridColumn: '1 / -1' }}>
                     <div className="sec-hd">フランシス水車　ランナーベーン翼断面図</div>
-                    <div style={{ width: '100%', aspectRatio: '16/10', maxHeight: 400 }}>
-                      <FrancisBladeProfileSvg results={results} />
+                    <div style={{ width: '100%' }}>
+                      <FrancisBladeProfile results={results} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginTop: 10, fontSize: 10, color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {[
@@ -1065,7 +1065,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                           ['比速度 Ns', results.specificSpeed.toFixed(2), '静的'],
                           ['水車出力 Pw', results.turbinePower.toFixed(2) + ' kW', '静的'],
                           ['発電機出力 Pe', results.generatorPower.toFixed(2) + ' kW', '静的'],
-                          ['暴走速度', Math.round(results.runawaySpeed) + ' rpm', '動的'],
+                          ['無拘束速度', Math.round(results.runawaySpeed) + ' rpm', '動的'],
                           ['許容吸出し高さ', results.hsMax != null ? results.hsMax.toFixed(2) + ' m' : '—', '動的'],
                           ['大気圧（補正後）', results.atmPressure.toFixed(3) + ' kPa', '動的'],
                           ['σ_c（キャビ係数）', results.cavitationCoef != null ? results.cavitationCoef.toFixed(5) : '—', '導出'],
@@ -1085,7 +1085,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                             ['ケーシング入口径', (results.dimensions.francis.spiralCaseInlet * 1000).toFixed(1) + ' mm', '導出'],
                             ['ブレード数', String(results.dimensions.francis.numBlades) + ' 枚', '導出'],
                             ['最小流量 Qmin', (results.dimensions.francis.minFlow * 1000).toFixed(1) + ' l/s', '導出'],
-                            ['暴走時流量 Qr', (results.dimensions.francis.flowAtRunaway * 1000).toFixed(1) + ' l/s', '導出'],
+                            ['無拘束時流量 Qr', (results.dimensions.francis.flowAtRunaway * 1000).toFixed(1) + ' l/s', '導出'],
                           ] : []),
                           ...(results.dimensions.kaplan ? [
                             ['── カプラン ──', '', ''],
