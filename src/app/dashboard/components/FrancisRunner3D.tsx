@@ -50,7 +50,7 @@ export function FrancisRunner3D({ results }: Props) {
   const t1    = fd.t1
   const t2    = fd.t2
   const Ns    = results.specificSpeed
-  const nBlades = Math.round(Math.max(9, Math.min(19, 6 + Ns / 30)))
+  const nBlades = fd.Zr
 
   // dimVisible が変わったら ref にも反映
   useEffect(() => { dimVisRef.current = dimVisible }, [dimVisible])
@@ -339,7 +339,7 @@ export function FrancisRunner3D({ results }: Props) {
     }
 
     return () => { cleanupFn?.(); script.remove() }
-  }, [D1, D5, D6, D2, D7, B1, H2, beta1, beta2, Ns, nBlades])
+  }, [D1, D5, D6, D2, D7, B1, H2, beta1, beta2, nBlades])
 
   // 視点切替
   const handleSetView = (v: 'top'|'front'|'iso') => {

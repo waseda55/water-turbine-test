@@ -268,17 +268,18 @@ function calcFrancisDetailedParams(
   const Vu1    = G * Hth / U1
   const alpha1 = Math.atan2(Vm1, Vu1) * 180 / PI
 
-  const D_inlet  = Math.sqrt(D1 ** 2 + D5 ** 2) / 2
+  // Python準拠: sqrt((D1²+D5²)/2) — 二乗平均径
+  const D_inlet  = Math.sqrt((D1 ** 2 + D5 ** 2) / 2)
   const U_inlet  = PI * D_inlet * N / 60
   const Vu_inlet = G * Hth / U_inlet
-  const beta1b   = Math.atan2(Vm1, U_inlet - Vu_inlet) * 180 / PI
+  const beta1b   = Math.atan(Vm1 / (U_inlet - Vu_inlet)) * 180 / PI
 
-  const D_outlet = Math.sqrt(D6 ** 2 + D7 ** 2) / 2
+  // Python準拠: sqrt((D6²+D2²)/2) — D2（バンド下端径）使用
+  const D_outlet = Math.sqrt((D6 ** 2 + D2 ** 2) / 2)
   const U_outlet = PI * D_outlet * N / 60
-  const Vm2      = 4 * Q / (PI * (D2 ** 2 - D7 ** 2))
-  const beta2b   = Math.atan2(Vm2, U_outlet) * 180 / PI
-
-  // lb は後でbeta2b_correctを使って再計算
+  // Python準拠: 4Q/(π(D2²-D6²)) — D6（クラウン下端径）使用
+  const Vm2      = 4 * Q / (PI * (D2 ** 2 - D6 ** 2))
+  const beta2b   = Math.atan(Vm2 / U_outlet) * 180 / PI
 
   // ── ガイドベーン ──
   const kDg1 = 1.2817934656e-5 * Nsp ** 2 - 0.001219602867175  * Nsp + 1.221638424287550
@@ -321,17 +322,11 @@ function calcFrancisDetailedParams(
   else if (Nsp < 113 || Nsp >= 138) Zr = 16
   else Zr = 18
 
-  // 実際のD_outletはPythonに合わせてD6とD7を使う（既存コードのD7修正）
-  const D_outlet_correct = Math.sqrt((D6 ** 2 + D7 ** 2) / 2)
-  const U_outlet_correct  = PI * D_outlet_correct * N / 60
-  const Vm2_correct       = 4 * Q / (PI * (D2 ** 2 - D7 ** 2))
-  const beta2b_correct    = Math.atan2(Vm2_correct, U_outlet_correct) * 180 / PI
-
-  // lb（正しいbeta2bを使って再計算）
-  const b1r2 = beta1b * PI / 180, b2r2 = beta2b_correct * PI / 180
+  // lb（羽根長さ）
+  const b1r2 = beta1b * PI / 180, b2r2 = beta2b * PI / 180
   const tanRatio2 = Math.tan(b1r2 / 2) / Math.tan(b2r2 / 2)
   const lb_correct = tanRatio2 > 0 && (b2r2 - b1r2) !== 0
-    ? (D_outlet_correct - D_inlet) / (b2r2 - b1r2) / 2 * Math.log(tanRatio2)
+    ? (D_outlet - D_inlet) / (b2r2 - b1r2) / 2 * Math.log(tanRatio2)
     : null
 
   // ガイドベーン翼型厚み（NACAから）
@@ -418,10 +413,10 @@ function calcFrancisDetailedParams(
 
   return {
     D1, D5, D6, D2, D7, H2, B1, Vm1,
-    Vm2: Vm2_correct,
+    Vm2,
     alpha1,
     beta1b,
-    beta2b: beta2b_correct,
+    beta2b,
     lb: lb_correct,
     Zr, t1, t2,
     Dg1, Dg2, Rg, Dlx, Bg1, Bg2,
@@ -555,7 +550,7 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
       message: `標高 ${altitude}m　大気圧 ${atmPressure.toFixed(2)} kPa${altitude > 1500 ? '　→ キャビテーション余裕を再確認' : ''}`,
     },
     runaway: {
-      message: `暴走速度 ${runawaySpeed} rpm（係数×${runawayCoeff}）　発電機・軸系の許容回転数と比較してください`,
+      message: `無拘束速度 ${runawaySpeed} rpm（係数×${runawayCoeff}）　発電機・軸系の許容回転数と比較してください`,
     },
     headLoss: {
       result: headLossRatio <= 5 ? 'OK' : headLossRatio <= 10 ? '注意' : 'NG',
