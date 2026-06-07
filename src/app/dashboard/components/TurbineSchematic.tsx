@@ -145,8 +145,8 @@ function SchematicSpecs({ results, color }: { results: TurbineResults; color: st
     rows.push(
       ['入口径 D01', `${(d.francis.inletDiameter * 1000).toFixed(1)} mm`],
       ['GV高さ Bd', `${(d.francis.guideVaneHeight * 1000).toFixed(1)} mm`],
-      ['ブレード数', `${d.francis.numBlades} 枚`],
-      ['ガイドベーン数', `${d.francis.numGuideVanes} 枚`],
+      ['ブレード数', `${d.francisDetail?.Zr ?? d.francis.numBlades} 枚`],
+      ['ガイドベーン数', `${d.francisDetail?.Zg ?? d.francis.numGuideVanes} 枚`],
     )
   }
   if (d.kaplan) {

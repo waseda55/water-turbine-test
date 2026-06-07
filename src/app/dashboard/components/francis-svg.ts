@@ -9,8 +9,9 @@ export function buildFrancisSvg(results: TurbineResults): string {
   const D01  = f.inletDiameter                           // 入口径
   const Bd   = f.guideVaneHeight                         // ガイドベーン高さ
   const Dsc  = f.spiralCaseInlet                         // スパイラルケーシング径
-  const numBlades = f.numBlades
-  const numGV     = f.numGuideVanes
+  const fd = results.dimensions.francisDetail
+  const numBlades = fd?.Zr ?? f.numBlades
+  const numGV     = fd?.Zg ?? f.numGuideVanes
 
   const W = 520, H = 480
   const cx = W / 2, cy = H / 2 - 20

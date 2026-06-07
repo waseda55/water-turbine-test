@@ -67,7 +67,7 @@ export default function FrancisHillChart({ results, inputs }: Props) {
       svg.selectAll('*').remove()
 
       const W = svgRef.current!.clientWidth || 640
-      const H = 480
+      const H = 520  // was 480
       const ml=54, mr=85, mt=38, mb=50
       const pw = W-ml-mr, ph = H-mt-mb
 
@@ -139,7 +139,6 @@ export default function FrancisHillChart({ results, inputs }: Props) {
       }
 
       // ── Python levels=20 相当（ここから下は既存のまま） ──
-      // ── Python levels=20 相当 ──
       // ── 5刻みの固定等高線レベル（50,55,60,65,...）──
       const levelStep = 5
       const levelStart = Math.ceil(etaMin / levelStep) * levelStep
