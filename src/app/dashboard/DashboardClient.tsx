@@ -846,10 +846,10 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                       ['入口径 D01', `${(results.dimensions.francis.inletDiameter * 1000).toFixed(1)} mm`],
                       ['ガイドベーン高さ Bd', `${(results.dimensions.francis.guideVaneHeight * 1000).toFixed(1)} mm`],
                       ['スパイラルケーシング径', `${(results.dimensions.francis.spiralCaseInlet * 1000).toFixed(1)} mm`],
-                      ['ランナーブレード数', `${results.dimensions.francis.numBlades} 枚`],
-                      ['ガイドベーン数', `${results.dimensions.francis.numGuideVanes} 枚`],
+                      ['ランナーブレード数', `${results.dimensions.francisDetail?.Zr ?? results.dimensions.francis.numBlades} 枚`],
+                      ['ガイドベーン数', `${results.dimensions.francisDetail?.Zg ?? results.dimensions.francis.numGuideVanes} 枚`],
                       ['最小流量 Qmin', `${(results.dimensions.francis.minFlow * 1000).toFixed(1)} l/s`],
-                      ['暴走時流量 Qr', `${(results.dimensions.francis.flowAtRunaway * 1000).toFixed(1)} l/s`],
+                      ['無拘束時流量 Qr', `${(results.dimensions.francis.flowAtRunaway * 1000).toFixed(1)} l/s`],
                     ].map(([label, val]) => (
                       <div key={label} className="data-row"><span className="data-row-label">{label}</span><span className="data-row-val">{val}</span></div>
                     ))}
@@ -1028,9 +1028,9 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                             ['入口径 D01', (results.dimensions.francis.inletDiameter * 1000).toFixed(1) + ' mm', '導出'],
                             ['ガイドベーン高さ', (results.dimensions.francis.guideVaneHeight * 1000).toFixed(1) + ' mm', '導出'],
                             ['ケーシング入口径', (results.dimensions.francis.spiralCaseInlet * 1000).toFixed(1) + ' mm', '導出'],
-                            ['ブレード数', String(results.dimensions.francis.numBlades) + ' 枚', '導出'],
+                            ['ブレード数', String(results.dimensions.francisDetail?.Zr ?? results.dimensions.francis.numBlades) + ' 枚', '導出'],
                             ['最小流量 Qmin', (results.dimensions.francis.minFlow * 1000).toFixed(1) + ' l/s', '導出'],
-                            ['暴走時流量 Qr', (results.dimensions.francis.flowAtRunaway * 1000).toFixed(1) + ' l/s', '導出'],
+                            ['無拘束時流量 Qr', (results.dimensions.francis.flowAtRunaway * 1000).toFixed(1) + ' l/s', '導出'],
                           ] : []),
                           ...(results.dimensions.kaplan ? [
                             ['── カプラン ──', '', ''],
