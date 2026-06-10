@@ -668,7 +668,16 @@ export default function DashboardClient({ user, initialCalculations, initialProj
           <SliderInput label="有効落差（H）" id="H" value={inputs.head} min={2} max={1000} step={0.1} unit="m" dec={1} onChange={set('head')} />
           <FlowRateInput flowRate={inputs.flowRate} flowUnit={flowUnit}
             onFlowRateChange={v => update({ flowRate: v })} onUnitChange={setFlowUnit} />
-          <SliderInput label="水車効率（η_t）"   id="eta_t" value={inputs.turbineEff}   min={70}  max={95}   step={0.1} unit="%" dec={1} onChange={set('turbineEff')} />
+          <SliderInput label="水車効率 上限（η_t）" id="eta_t" value={inputs.turbineEff}   min={70}  max={95}   step={0.1} unit="%" dec={1} onChange={set('turbineEff')} />
+          {results.predictedEff !== null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: -4, marginBottom: 4, paddingLeft: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>比速度多項式推定：</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#34d399', fontFamily: 'var(--font-mono)' }}>
+                η_pred = {(results.predictedEff * 100).toFixed(2)} %
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--muted)' }}>(実計算に使用)</span>
+            </div>
+          )}
           <SliderInput label="発電機効率（η_g）" id="eta_g" value={inputs.generatorEff} min={90}  max={99}   step={0.1} unit="%" dec={1} onChange={set('generatorEff')} />
 
           <div className="sec-hd" style={{ marginTop: 16 }}>回転数選定</div>
@@ -780,6 +789,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
                     { label: '定格回転速度', val: Math.round(results.ratedRpm),      unit: 'rpm' },
                     { label: '極数',         val: results.poles,                     unit: 'P' },
                     { label: '無拘束速度',     val: Math.round(results.runawaySpeed),  unit: 'rpm' },
+                    ...(results.predictedEff !== null ? [{ label: '推定最高効率 η_pred', val: (results.predictedEff * 100).toFixed(2), unit: '%' }] : []),
                   ].map(k => (
                     <div key={k.label} className="kpi-tile">
                       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: 'var(--accent)', lineHeight: 1.15 }}>{k.val}</div>

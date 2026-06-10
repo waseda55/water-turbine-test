@@ -57,6 +57,7 @@ export interface TurbineResults {
   turbinePower: number      // 水車出力 Pw [kW]
   generatorPower: number    // 発電機出力 Pe [kW]
   specificSpeed: number     // 比速度 Ns
+  predictedEff: number | null  // 比速度多項式による推定効率 η_pred [0-1]（フランシス・軸流のみ）
   ratedRpm: number          // 定格回転速度 [rpm]
   poles: number             // 極数
   runawaySpeed: number      // 暴走速度 [rpm]

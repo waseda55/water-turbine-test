@@ -5,12 +5,133 @@ const G   = 9.81
 const PV  = 2.34
 const PI  = Math.PI
 
-const MAX_POLE = 24		// 80 -> 24
-const MIN_POLE = 4		// 2 -> 4
-const NS_BASIS = 160		// 150 -> 160
-const MAX_NRPM = 1800		// 1500 -> 1800
-const MIN_NRPM = 250		// 100 -> 250
+const MAX_POLE = 24
+const MIN_POLE = 4
+const MAX_NRPM = 1800
+const MIN_NRPM = 250
 
+// ── Pythonロジック移植：比速度多項式効率予測 ──────────────────
+// Nsp_selection_Francis.py / Nsp_selection_Kaplan.py 準拠
+export function predictEfficiencyFrancis(nsp: number): number {
+  if (nsp <= 0 || nsp > 250) return 0
+  const a1 =  4.10595593096658e-15
+  const a2 = -4.06149233076544e-12
+  const a3 =  1.54292594714693e-9
+  const a4 = -2.70929552576744e-7
+  const a5 =  1.51727801283444e-5
+  const a6 =  1.54679574082055e-3
+  const a7 =  0.772242990767851
+  const eta = (0.94 / 0.954) * (
+    a1 * nsp**6 + a2 * nsp**5 + a3 * nsp**4 +
+    a4 * nsp**3 + a5 * nsp**2 + a6 * nsp + a7
+  )
+  return Math.max(0, eta)
+}
+
+export function predictEfficiencyAxial(nsp: number): number {
+  if (nsp < 160) return 0
+  const a1 =  2.47393805299146e-18
+  const a2 = -1.11375200862319e-14
+  const a3 =  1.92413681801568e-11
+  const a4 = -1.57421653641474e-8
+  const a5 =  5.81550689423269e-6
+  const a6 = -6.80635925583009e-4
+  const a7 =  0.945904272122272
+  const eta = 0.94 * (
+    a1 * nsp**6 + a2 * nsp**5 + a3 * nsp**4 +
+    a4 * nsp**3 + a5 * nsp**2 + a6 * nsp + a7
+  )
+  return Math.max(0, eta)
+}
+
+// ── Pythonロジック移植：収束計算（N・H・Q → eta, P, Nsp）────────
+// Nsp_selection.py の calculate_converged_efficiency() 準拠
+type ConvergeResult = { eta: number; P: number; Nsp: number } | null
+
+function convergeEfficiency(
+  N: number, H: number, Q: number,
+  predictFn: (nsp: number) => number,
+  tol = 1e-5, maxIter = 100,
+): ConvergeResult {
+  let eta = 0.85
+  for (let i = 0; i < maxIter; i++) {
+    const P = eta * RHO * G * Q * H / 1000
+    if (P <= 0) return null
+    const Nsp = N * Math.sqrt(P) / Math.pow(H, 1.25)
+    const newEta = predictFn(Nsp)
+    if (newEta <= 0) return { eta: 0, P, Nsp }
+    if (Math.abs(newEta - eta) < tol) return { eta: newEta, P, Nsp }
+    eta = newEta
+  }
+  return null
+}
+
+// ── Pythonロジック移植：形式＋回転数統合選定 ─────────────────────
+// Nsp_selection.py の main() ロジック準拠
+// 戻り値: 最適候補（turbineType, n, poles, Nsp, predictedEff）
+interface NspCandidate {
+  turbineType: 'フランシス水車' | 'カプラン水車'
+  n: number
+  poles: number
+  Nsp: number
+  P: number
+  eta: number
+  diff: number
+}
+
+function selectByNspConvergence(
+  head: number, flowRate: number, freq: 50 | 60,
+  enableFrancis: boolean, enableAxial: boolean,
+): { turbineType: 'フランシス水車' | 'カプラン水車'; n: number; poles: number; Nsp: number; predictedEff: number } | null {
+  const TOLERANCE = 10.0
+  const targetsFrancis = [70, 160, 250]
+  const targetsAxial   = [300, 500, 900]
+  const candidates: NspCandidate[] = []
+
+  for (let p = MIN_POLE; p <= MAX_POLE; p += 2) {
+    const N = 120 * freq / p
+    if (N < MIN_NRPM || N > MAX_NRPM) continue
+
+    if (enableFrancis) {
+      const res = convergeEfficiency(N, head, flowRate, predictEfficiencyFrancis)
+      if (res && res.eta > 0) {
+        const { Nsp, P, eta } = res
+        // フランシス限界落差チェック（Nsp_selection_Francis.py 準拠）
+        const HmaxOk = Nsp <= 40 || head <= (23000 / (Nsp - 40) - 30)
+        if (HmaxOk) {
+          for (const t of targetsFrancis) {
+            candidates.push({ turbineType: 'フランシス水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t) })
+          }
+        }
+      }
+    }
+
+    if (enableAxial) {
+      const res = convergeEfficiency(N, head, flowRate, predictEfficiencyAxial)
+      if (res && res.eta > 0) {
+        const { Nsp, P, eta } = res
+        // 軸流限界落差チェック（Nsp_selection_Kaplan.py 準拠）
+        const HmaxOk = Nsp <= 35 || head <= (20000 / (Nsp - 35) - 17)
+        if (HmaxOk) {
+          for (const t of targetsAxial) {
+            candidates.push({ turbineType: 'カプラン水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t) })
+          }
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null
+
+  const withinTol = candidates.filter(c => c.diff <= TOLERANCE)
+  const best = withinTol.length > 0
+    ? withinTol.reduce((a, b) => a.eta >= b.eta ? a : b)
+    : candidates.reduce((a, b) => a.diff < b.diff || (a.diff === b.diff && a.eta >= b.eta) ? a : b)
+
+  return { turbineType: best.turbineType, n: best.n, poles: best.poles, Nsp: best.Nsp, predictedEff: best.eta }
+}
+
+// 旧 selectRatedSpeed: フォールバック用（Pelton/Crossflow/Tubular向け）
 function selectRatedSpeed(pw: number, head: number, freq: 50 | 60, targetNs: number): { n: number; poles: number } {
   let bestN = 100, bestPoles = MIN_POLE, bestDiff = Infinity
   for (let p = MIN_POLE; p <= MAX_POLE; p += 2) {
@@ -105,43 +226,55 @@ function calcTubularDimensions(ns: number, flowRate: number, runnerDiameter: num
   return { numBlades, hubDiameter, hubRatio, numGuideVanes, coneAngle, minFlow }
 }
 
-// ── 自動形式選択 ───────────────────────────────────────────────
-// ※ クロスフロー水車は自動選定対象外（手動選択のみ）
-// ※ nsRanges が渡された場合はDB値を使用。なければフォールバック値で動作。
-// ※ turbine_types.is_active = false の形式は選定対象から除外される。
-function autoSelectType(
-  head: number,
-  flowRate: number,
-  specificSpeed: number,
-  nsRanges?: NsRange[],
-): TurbineType {
-  // is_active な形式のみを対象にする
+// ── 自動形式選択（Python統合ロジック） ────────────────────────
+// フランシス・カプランはNsp収束計算で選定。
+// ペルトン・チューブラ・クロスフローは落差条件で振り分け。
+// nsRangesが渡された場合はis_activeチェックを行う。
+function autoSelectTypeWithNsp(
+  head: number, flowRate: number, specificSpeed: number,
+  freq: 50 | 60, nsRanges?: NsRange[],
+): { turbineType: TurbineType; overrideRpm?: number; overridePoles?: number; predictedEff?: number } {
   const isActive = (name: TurbineType) =>
     nsRanges === undefined ||
     nsRanges.some(r => r.turbineType.name === name && r.turbineType.isActive)
 
-  const nsOf = (name: TurbineType) => nsRanges?.find(r => r.turbineType.name === name)
+  // チューブラ：超低落差（H≦20m）かつ大流量・高比速度
+  const tubular = nsRanges?.find(r => r.turbineType.name === 'チューブラ水車')
+  const tubularNsMin = tubular?.nsMin ?? 300
+  if (isActive('チューブラ水車') && head <= 20 && flowRate >= 1.0 && specificSpeed >= tubularNsMin) {
+    return { turbineType: 'チューブラ水車' }
+  }
 
-  const pelton  = nsOf('ペルトン水車')
-  const francis = nsOf('フランシス水車')
-  const tubular = nsOf('チューブラ水車')
+  // ペルトン：高落差（H>200m）
+  if (isActive('ペルトン水車') && head > 200) {
+    return { turbineType: 'ペルトン水車' }
+  }
 
-  // 各形式のNs閾値（DBになければフォールバック値を使用）
+  // フランシス・カプランはPythonNsp収束計算で選定
+  const enableFrancis = isActive('フランシス水車')
+  const enableAxial   = isActive('カプラン水車')
+  if (enableFrancis || enableAxial) {
+    const nspResult = selectByNspConvergence(head, flowRate, freq, enableFrancis, enableAxial)
+    if (nspResult) {
+      return {
+        turbineType: nspResult.turbineType,
+        overrideRpm: nspResult.n,
+        overridePoles: nspResult.poles,
+        predictedEff: nspResult.predictedEff,
+      }
+    }
+  }
+
+  // フォールバック：比速度ベース
+  const pelton  = nsRanges?.find(r => r.turbineType.name === 'ペルトン水車')
+  const francis = nsRanges?.find(r => r.turbineType.name === 'フランシス水車')
   const peltonNsMax  = pelton?.nsMax  ?? 100
   const francisNsMax = francis?.nsMax ?? 400
-  const tubularNsMin = tubular?.nsMin ?? 300
-
-  // チューブラ：超低落差（H≦20m）かつ大流量・高比速度（is_active な場合のみ）
-  if (isActive('チューブラ水車') && head <= 20 && flowRate >= 1.0 && specificSpeed >= tubularNsMin) return 'チューブラ水車'
-  // ペルトン：高落差（H>200m）または比速度がペルトン上限以下（is_active な場合のみ）
-  if (isActive('ペルトン水車') && (head > 200 || specificSpeed < peltonNsMax)) return 'ペルトン水車'
-  // フランシス：比速度がフランシス上限以下（is_active な場合のみ）
-  if (isActive('フランシス水車') && specificSpeed <= francisNsMax) return 'フランシス水車'
-  // カプラン：それ以外（is_active な場合のみ）
-  if (isActive('カプラン水車')) return 'カプラン水車'
-  // すべてのアクティブ候補が外れた場合、is_active な最初の形式を返す
+  if (isActive('ペルトン水車') && specificSpeed < peltonNsMax) return { turbineType: 'ペルトン水車' }
+  if (isActive('フランシス水車') && specificSpeed <= francisNsMax) return { turbineType: 'フランシス水車' }
+  if (isActive('カプラン水車')) return { turbineType: 'カプラン水車' }
   const fallback = nsRanges?.find(r => r.turbineType.isActive)
-  return (fallback?.turbineType.name ?? 'フランシス水車') as TurbineType
+  return { turbineType: (fallback?.turbineType.name ?? 'フランシス水車') as TurbineType }
 }
 
 // ── 速度三角形ヘルパー ────────────────────────────────────────
@@ -438,26 +571,72 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   const etaT = turbineEff / 100
   const etaG = generatorEff / 100
 
-  const turbinePower   = (RHO * G * flowRate * head * etaT) / 1000
-  const generatorPower = turbinePower * etaG
-  const { n: ratedRpm, poles } = selectRatedSpeed(turbinePower, head, frequency, targetNs ?? 160)
-  const specificSpeed = ratedRpm * Math.sqrt(turbinePower) / Math.pow(head, 1.25)
-
-  // ── 形式選択 ──
+  // ── 形式選択・回転数選定 ──────────────────────────────────────
+  // フランシス・カプランはPythonNsp収束計算で形式と回転数を同時決定する。
+  // ペルトン・チューブラ・クロスフローは従来の方法で先に決める。
   let turbineType: TurbineType
+  let ratedRpm: number
+  let poles: number
+  let predictedEff: number | null = null
   let runawayCoeff: number
 
   if (forcedType) {
+    // ── 手動指定形式 ──
     turbineType = forcedType
     runawayCoeff = (forcedType === 'カプラン水車' || forcedType === 'チューブラ水車') ? 2.5
-      : forcedType === 'クロスフロー水車' ? 1.7
-      : 1.8
+      : forcedType === 'クロスフロー水車' ? 1.7 : 1.8
+
+    if (forcedType === 'フランシス水車' || forcedType === 'カプラン水車') {
+      // 指定形式でもNsp収束計算を実行して推定効率・最適回転数を取得
+      const nspRes = selectByNspConvergence(
+        head, flowRate, frequency,
+        forcedType === 'フランシス水車',
+        forcedType === 'カプラン水車',
+      )
+      if (nspRes) {
+        ratedRpm    = nspRes.n
+        poles       = nspRes.poles
+        predictedEff = nspRes.predictedEff
+      } else {
+        // フォールバック：従来方式
+        const turbinePowerEst = etaT * RHO * G * flowRate * head / 1000
+        const fallback = selectRatedSpeed(turbinePowerEst, head, frequency, targetNs ?? 160)
+        ratedRpm = fallback.n; poles = fallback.poles
+      }
+    } else {
+      const turbinePowerEst = etaT * RHO * G * flowRate * head / 1000
+      const fallback = selectRatedSpeed(turbinePowerEst, head, frequency, targetNs ?? 160)
+      ratedRpm = fallback.n; poles = fallback.poles
+    }
   } else {
-    turbineType = autoSelectType(head, flowRate, specificSpeed, nsRanges)
+    // ── 自動選択 ──
+    // まず暫定的な turbinePower・specificSpeed を計算してチューブラ/ペルトン条件を判定
+    const turbinePowerEst  = etaT * RHO * G * flowRate * head / 1000
+    const fallbackRpm = selectRatedSpeed(turbinePowerEst, head, frequency, targetNs ?? 160)
+    const specificSpeedEst = fallbackRpm.n * Math.sqrt(turbinePowerEst) / Math.pow(head, 1.25)
+
+    const selected = autoSelectTypeWithNsp(head, flowRate, specificSpeedEst, frequency, nsRanges)
+    turbineType  = selected.turbineType
     runawayCoeff = (turbineType === 'カプラン水車' || turbineType === 'チューブラ水車') ? 2.5
-      : turbineType === 'クロスフロー水車' ? 1.7
-      : 1.8
+      : turbineType === 'クロスフロー水車' ? 1.7 : 1.8
+
+    if (selected.overrideRpm !== undefined && selected.overridePoles !== undefined) {
+      ratedRpm     = selected.overrideRpm
+      poles        = selected.overridePoles
+      predictedEff = selected.predictedEff ?? null
+    } else {
+      ratedRpm = fallbackRpm.n; poles = fallbackRpm.poles
+    }
   }
+
+  // ── 出力・比速度 ──────────────────────────────────────────────
+  // 推定効率がある場合はそちらを使い、turbineEff入力は上限として使用
+  const effForCalc = predictedEff !== null
+    ? Math.min(predictedEff, etaT)   // 推定効率が入力上限を超えない
+    : etaT
+  const turbinePower   = (RHO * G * flowRate * head * effForCalc) / 1000
+  const generatorPower = turbinePower * etaG
+  const specificSpeed  = ratedRpm * Math.sqrt(turbinePower) / Math.pow(head, 1.25)
 
   const runawaySpeed = Math.round(ratedRpm * runawayCoeff)
   const atmPressure  = 101.325 * Math.exp(-altitude / 8500)
@@ -504,7 +683,7 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   // ── 形式別専用寸法 ──
   const peltonDim      = turbineType === 'ペルトン水車'     ? calcPeltonDimensions(specificSpeed, head, flowRate, runnerDiameter)   : null
   const francisDim     = turbineType === 'フランシス水車'   ? calcFrancisDimensions(specificSpeed, flowRate, runnerDiameter)        : null
-  const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, etaT, ratedRpm, specificSpeed) : null
+  const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, effForCalc, ratedRpm, specificSpeed) : null
   const kaplanDim      = turbineType === 'カプラン水車'     ? calcKaplanDimensions(specificSpeed, flowRate, runnerDiameter)         : null
   const crossflowDim   = turbineType === 'クロスフロー水車' ? calcCrossflowDimensions(head, flowRate, runnerDiameter)              : null
   const tubularDim     = turbineType === 'チューブラ水車'   ? calcTubularDimensions(specificSpeed, flowRate, runnerDiameter)       : null
@@ -578,6 +757,7 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
 
   return {
     turbineType, turbinePower, generatorPower, specificSpeed,
+    predictedEff,
     ratedRpm, poles, runawaySpeed, cavitationCoef, hsMax,
     atmPressure, runawayCoeff,
     dimensions: {
