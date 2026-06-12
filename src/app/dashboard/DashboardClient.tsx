@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { calculate, getEfficiencyCurve, getHillChartData } from '@/lib/turbine-calc'
+import { calculate, getEfficiencyCurve, getHillChartData, calcFrancisEfficiencyCurve } from '@/lib/turbine-calc'
 import { exportJSON, exportCSV, exportExcel, exportDXF, importJSON } from '@/lib/export'
 import type { TurbineInputs, TurbineResults, TurbineType, HQRange, NsRange } from '@/types'
 import { useRouter } from 'next/navigation'
@@ -27,13 +27,7 @@ interface HistoryRow {
 }
 interface ProjectRow { id: string; name: string }
 
-interface Props {
-  user: { email: string }
-  initialCalculations: HistoryRow[]
-  initialProjects: ProjectRow[]
-  hqRanges: HQRange[]
-  nsRanges: NsRange[]
-}
+interface Props {}
 
 // ─── 流量単位変換 ──────────────────────────────────────────────
 type FlowUnit = 'm3/s' | 'l/s' | 'm3/min' | 'm3/h' | 'l/min' | 'l/h'
@@ -425,12 +419,14 @@ function SliderInput({ label, id, value, min, max, step, unit, dec = 1, onChange
 }
 
 // ─── メインコンポーネント ─────────────────────────────────────
-export default function DashboardClient({ user, initialCalculations, initialProjects, hqRanges, nsRanges }: Props) {
+export default function DashboardClient(_props: Props) {
+  const [hqRanges, setHqRanges] = useState<HQRange[]>([])
+  const [nsRanges, setNsRanges] = useState<NsRange[]>([])
   const [inputs, setInputs] = useState<TurbineInputs>(DEFAULT_INPUTS)
   const [forcedType, setForcedType] = useState<TurbineType | null>(null)
-  const [results, setResults] = useState<TurbineResults>(() => calculate(DEFAULT_INPUTS, undefined, nsRanges))
-  const [history, setHistory] = useState<HistoryRow[]>(initialCalculations)
-  const [projects] = useState<ProjectRow[]>(initialProjects)
+  const [results, setResults] = useState<TurbineResults>(() => calculate(DEFAULT_INPUTS, undefined, []))
+  const [history, setHistory] = useState<HistoryRow[]>([])
+  const [projects, setProjects] = useState<ProjectRow[]>([])
   const [saving, setSaving] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
@@ -446,18 +442,78 @@ export default function DashboardClient({ user, initialCalculations, initialProj
   const [flowUnit, setFlowUnit] = useState<FlowUnit>('m3/s')
   const router = useRouter()
   const supabase = createClient()
+  const [userEmail, setUserEmail] = useState('')
+
+  // ── クライアント側でデータを非同期取得（SSRのDB待ちを排除）──
+  useEffect(() => {
+    // ユーザー情報取得
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setUserEmail(data.user.email ?? '')
+    })
+
+    // 履歴・プロジェクト
+    const sb = supabase as any
+    sb.from('calculations').select('*').order('created_at', { ascending: false }).limit(20)
+      .then(({ data }: any) => { if (data) setHistory(data) })
+    sb.from('projects').select('*').order('updated_at', { ascending: false })
+      .then(({ data }: any) => { if (data) setProjects(data) })
+
+    // HQ/Ns範囲データ（selection-ranges の fetch をクライアント側で再実装）
+    sb.from('hq_ranges').select(`
+      id, turbine_type_id, boundary_points,
+      h_min, h_max, q_min, q_max, source, note, version,
+      turbine_types ( id, name, icon, color, sort_order, is_active )
+    `).eq('is_active', true).order('turbine_type_id')
+      .then(({ data }: any) => {
+        if (!data) return
+        setHqRanges(data.map((r: any) => ({
+          id: r.id, turbineTypeId: r.turbine_type_id,
+          turbineType: {
+            id: r.turbine_types.id, name: r.turbine_types.name,
+            icon: r.turbine_types.icon, color: r.turbine_types.color,
+            sortOrder: r.turbine_types.sort_order, isActive: r.turbine_types.is_active,
+          },
+          boundaryPoints: r.boundary_points as { q: number; h: number }[],
+          hMin: Number(r.h_min), hMax: Number(r.h_max),
+          qMin: Number(r.q_min), qMax: Number(r.q_max),
+          source: r.source, note: r.note, version: r.version,
+        })))
+      })
+
+    sb.from('ns_ranges').select(`
+      id, turbine_type_id,
+      ns_min, ns_max, overlap_note, source, note, version,
+      turbine_types ( id, name, icon, color, sort_order, is_active )
+    `).eq('is_active', true).order('turbine_type_id')
+      .then(({ data }: any) => {
+        if (!data) return
+        const ranges = data.map((r: any) => ({
+          id: r.id, turbineTypeId: r.turbine_type_id,
+          turbineType: {
+            id: r.turbine_types.id, name: r.turbine_types.name,
+            icon: r.turbine_types.icon, color: r.turbine_types.color,
+            sortOrder: r.turbine_types.sort_order, isActive: r.turbine_types.is_active,
+          },
+          nsMin: Number(r.ns_min), nsMax: Number(r.ns_max),
+          overlapNote: r.overlap_note,
+          source: r.source, note: r.note, version: r.version,
+        }))
+        setNsRanges(ranges)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const update = useCallback((patch: Partial<TurbineInputs>) => {
     setInputs(prev => {
       const next = { ...prev, ...patch }
-      setResults(calculate(next, forcedType ?? undefined, nsRanges))
+      setResults(calculate(next, forcedType ?? undefined, nsRangesRef.current))
       return next
     })
   }, [forcedType])
 
   const handleForcedType = useCallback((type: TurbineType | null) => {
     setForcedType(type)
-    setInputs(prev => { setResults(calculate(prev, type ?? undefined, nsRanges)); return prev })
+    setInputs(prev => { setResults(calculate(prev, type ?? undefined, nsRangesRef.current)); return prev })
   }, [])
 
   const set = (key: keyof TurbineInputs) => (v: number) => update({ [key]: v })
@@ -469,7 +525,73 @@ export default function DashboardClient({ user, initialCalculations, initialProj
     : results.turbineType === 'クロスフロー水車' ? '#fb923c'
     : '#f472b6'  // チューブラ水車
 
-  const effData = getEfficiencyCurve(results.turbineType, inputs.turbineEff / 100)
+  const effChartRef = useRef<HTMLDivElement>(null)
+
+  // nsRanges が揃ったら results を1回だけ再計算（フェッチ完了後）
+  const nsRangesRef = useRef<typeof nsRanges>([])
+  useEffect(() => {
+    if (nsRanges.length === 0) return
+    nsRangesRef.current = nsRanges
+    setResults(calculate(inputs, forcedType ?? undefined, nsRanges))
+  // inputsやforcedTypeが変わっても不要に再計算しない（nsRanges到着時の1回のみ）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nsRanges])
+
+  // フランシス水車かつ詳細設計データがある場合は1d損失モデルを非同期で計算
+  // 計算中はフォールバック曲線を表示してUIブロックを防ぐ
+  const [francis1dData, setFrancis1dData] = useState<Array<Record<string, number>> | null>(null)
+  const [eff1dLoading, setEff1dLoading] = useState(false)
+
+  useEffect(() => {
+    const detail = results.dimensions.francisDetail
+    if (results.turbineType !== 'フランシス水車' || !detail) {
+      setFrancis1dData(null)
+      return
+    }
+    setEff1dLoading(true)
+    let cancelled = false
+    const tid = setTimeout(() => {
+      if (cancelled) return
+      try {
+        const pts = calcFrancisEfficiencyCurve(detail!, inputs.head, results.ratedRpm)
+        if (pts.length >= 3) {
+          setFrancis1dData(pts.map(p => ({
+            Q:    Math.round(p.Q * 1000) / 1000,
+            eta:  Math.round(p.eta  * 1000) / 10,
+            etah: Math.round(p.etah * 1000) / 10,
+            etal: Math.round(p.etal * 1000) / 10,
+            etam: Math.round(p.etam * 1000) / 10,
+          })))
+        } else {
+          setFrancis1dData(null)
+        }
+      } catch(e) {
+        console.error('[1d] error:', e)
+        setFrancis1dData(null)
+      }
+      setEff1dLoading(false)
+    }, 100)
+    return () => { cancelled = true; clearTimeout(tid) }
+  }, [results.turbineType, results.dimensions.francisDetail, inputs.head, results.ratedRpm])
+
+  const downloadEffChart = useCallback(async () => {
+    if (!effChartRef.current) return
+    const { default: html2canvas } = await import('html2canvas')
+    const canvas = await html2canvas(effChartRef.current, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+    })
+    const a = document.createElement('a')
+    a.href = canvas.toDataURL('image/png')
+    a.download = 'efficiency_curve.png'
+    a.click()
+  }, [])
+
+  const effDataFallback = useMemo(() => {
+    const fakeResults = { ...results, dimensions: { ...results.dimensions, francisDetail: undefined } }
+    return getEfficiencyCurve(fakeResults as unknown as typeof results, inputs.turbineEff / 100)
+  }, [results.turbineType, inputs.turbineEff])
+  const effData = francis1dData ?? effDataFallback
 
   const handleSave = async () => {
     if (!saveName.trim()) return
@@ -515,7 +637,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
     setImportMsg(null)
     try {
       const payload = await importJSON(file)
-      setInputs(payload.inputs); setResults(calculate(payload.inputs, forcedType ?? undefined, nsRanges))
+      setInputs(payload.inputs); setResults(calculate(payload.inputs, forcedType ?? undefined, nsRangesRef.current))
       setImportMsg({ type: 'ok', text: `「${payload.caseName}」を読み込みました` })
     } catch (err) {
       setImportMsg({ type: 'err', text: err instanceof Error ? err.message : '読み込みエラー' })
@@ -537,7 +659,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
       penstock: { length: data.penstock_length ?? 500, material: data.penstock_material ?? 'steel' },
       targetNs: data.target_ns ?? 160,
     }
-    setInputs(restored); setResults(calculate(restored, forcedType ?? undefined, nsRanges))
+    setInputs(restored); setResults(calculate(restored, forcedType ?? undefined, nsRangesRef.current))
   }
 
   const fu = FLOW_UNITS.find(u => u.key === flowUnit)!
@@ -591,7 +713,7 @@ export default function DashboardClient({ user, initialCalculations, initialProj
             </span>
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 4 }} className="hidden sm:block">{user.email}</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginRight: 4 }} className="hidden sm:block">{userEmail}</span>
             <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="btn" style={{ padding: '4px 8px', fontSize: 13 }}>
               {theme === 'dark' ? '☀' : '☾'}
             </button>
@@ -968,29 +1090,68 @@ export default function DashboardClient({ user, initialCalculations, initialProj
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div className="panel" style={{ padding: 14 }}>
-                  <div className="sec-hd">効率曲線 η(Q/Qd)</div>
+                  <div className="sec-hd" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>効率曲線 {francis1dData ? 'η(Q) [1次元損失モデル]' : eff1dLoading ? 'η(Q) [計算中…]' : 'η(Q/Qd)'}</span>
+                    {francis1dData && (
+                      <button onClick={downloadEffChart} style={{ fontSize: 10, padding: '2px 8px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 2, cursor: 'pointer', color: 'var(--muted)', fontFamily: 'JetBrains Mono' }}>
+                        ↓ PNG
+                      </button>
+                    )}
+                  </div>
+                  <div ref={effChartRef}>
                   <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={effData} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
+                    <LineChart data={francis1dData ?? effData} margin={{ top: 4, right: 8, left: -10, bottom: 16 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis dataKey="q" tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }} tickFormatter={v => v + '%'} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }} tickFormatter={v => v + '%'} />
+                      {francis1dData ? (
+                        <XAxis dataKey="Q" type="number" domain={['auto','auto']} tickCount={6}
+                          tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }}
+                          tickFormatter={(v: number) => Number.isInteger(v) ? v.toString() : v.toFixed(1)}
+                          label={{ value: 'Q [m³/s]', position: 'insideBottom', offset: -6, fontSize: 10, fill: 'var(--muted)' }} />
+                      ) : (
+                        <XAxis dataKey="q" tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }} tickFormatter={v => v + '%'}
+                          label={{ value: 'Q/Qd [%]', position: 'insideBottom', offset: -6, fontSize: 10, fill: 'var(--muted)' }} />
+                      )}
+                      <YAxis
+                        domain={([dataMin, dataMax]: [number, number]) => {
+                          const lo = Math.floor(dataMin / 5) * 5
+                          const hi = Math.ceil(dataMax / 5) * 5
+                          return [lo, hi]
+                        }}
+                        ticks={(() => {
+                          const data = francis1dData ?? effData
+                          if (!data || data.length === 0) return [0,20,40,60,80,100]
+                          const vals = data.map((d: Record<string,number>) => d.eta ?? d[Object.keys(d).find(k=>k!=='q'&&k!=='Q')??''] ?? 0).filter(isFinite)
+                          const lo = Math.floor(Math.min(...vals) / 5) * 5
+                          const hi = Math.ceil(Math.max(...vals) / 5) * 5
+                          const t = []
+                          for (let v = lo; v <= hi; v += 5) t.push(v)
+                          return t
+                        })()}
+                        tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }} tickFormatter={v => v + '%'}
+                        label={{ value: 'η [%]', angle: -90, position: 'insideLeft', offset: 12, fontSize: 10, fill: 'var(--muted)' }} />
                       <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 0, fontSize: 11, fontFamily: 'JetBrains Mono' }}
-                        formatter={(v: number, name: string) => [v.toFixed(1) + '%', name]} labelFormatter={v => `Q/Qd = ${v}%`} />
-                      {[
-                        { key: 'フランシス水車',   color: '#38bdf8', dash: '' },
-                        { key: 'カプラン水車',     color: '#34d399', dash: '4 3' },
-                        { key: 'ペルトン水車',    color: '#a78bfa', dash: '2 2' },
-                        { key: 'クロスフロー水車', color: '#fb923c', dash: '6 2' },
-                        { key: 'チューブラ水車',   color: '#f472b6', dash: '1 3' },
-                      ].map(({ key, color, dash }) => (
-                        <Line key={key} type="monotone" dataKey={key}
-                          stroke={results.turbineType === key ? color : color + '44'}
-                          strokeWidth={results.turbineType === key ? 2 : 1}
-                          strokeDasharray={dash} dot={false} />
-                      ))}
+                        formatter={(v: number, name: string) => [v.toFixed(1) + '%', name]}
+                        labelFormatter={(v: number) => francis1dData ? `Q = ${Number(v).toFixed(3)} m³/s` : `Q/Qd = ${v}%`} />
+                      {francis1dData ? (
+                        <Line type="monotone" dataKey="eta" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3, fill: '#38bdf8' }} name="Total Efficiency" />
+                      ) : (
+                        [
+                          { key: 'フランシス水車',   color: '#38bdf8', dash: '' },
+                          { key: 'カプラン水車',     color: '#34d399', dash: '4 3' },
+                          { key: 'ペルトン水車',    color: '#a78bfa', dash: '2 2' },
+                          { key: 'クロスフロー水車', color: '#fb923c', dash: '6 2' },
+                          { key: 'チューブラ水車',   color: '#f472b6', dash: '1 3' },
+                        ].map(({ key, color, dash }) => (
+                          <Line key={key} type="monotone" dataKey={key}
+                            stroke={results.turbineType === key ? color : color + '44'}
+                            strokeWidth={results.turbineType === key ? 2 : 1}
+                            strokeDasharray={dash} dot={false} />
+                        ))
+                      )}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                  </div>
 
                 {/* 子午面断面図・翼型断面図・3Dは「📐 設計図面」タブに移動済み */}
 

@@ -521,8 +521,8 @@ function calcFrancisDetailedParams(
   const dS1r = alphaS1b * PI / 180, dS2r = alphaS2b * PI / 180
   const tanS = Math.tan(dS1r / 2) / Math.tan(dS2r / 2)
   const ls = tanS > 0 && (dS2r - dS1r) !== 0
-    ? (Ds1n - Ds2n) / (dS2r - dS1r) / 2 * Math.log(tanS)
-    : (Ds1n - Ds2n) / 2
+    ? Math.abs((Ds1n - Ds2n) / (dS2r - dS1r) / 2 * Math.log(tanS))
+    : Math.abs((Ds1n - Ds2n) / 2)
 
   // ドラフトチューブ
   const ldc  = 0.742604857 * D2
@@ -777,23 +777,350 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   }
 }
 
-export function getEfficiencyCurve(turbineType: TurbineType, etaT: number) {
+// ── 1d損失モデル（1d_loss_ver2.py 移植）フランシス水車専用 ─────
+// 各損失θ = H_loss / H0（無次元化）をGVO別に積み上げて η を計算する
+const RHO_1D = 998.2
+const MU_1D  = 0.001004
+const PI_1D  = Math.PI
+
+function _frictionFactor(Re: number, rr: number): number {
+  if (!isFinite(Re) || Re <= 0) return 0.02
+  if (Re < 2000) return 64 / Re
+  if (Re < 4000) return 0.03  // 遷移域の近似
+  // Swamee-Jain式で初期値を設定（ニュートン法の発散を防ぐ）
+  let lam = 0.25 / (Math.log10(rr / 3.7 + 5.74 / Re ** 0.9)) ** 2
+  if (!isFinite(lam) || lam <= 0) lam = 0.02
+  for (let i = 0; i < 200; i++) {
+    const arg = rr / 3.71 + 2.51 / Re / Math.sqrt(lam)
+    if (arg <= 0) break
+    const f  = 1 / Math.sqrt(lam) + 2 * Math.log10(arg)
+    const df = -0.5 * lam ** -1.5 - 2.51 / (Re * Math.log(10)) * lam ** -1.5 / arg
+    if (!isFinite(df) || df === 0) break
+    const nl = lam - f / df
+    if (!isFinite(nl) || nl <= 0) break
+    if (Math.abs(nl - lam) < 1e-9) return nl
+    lam = nl
+  }
+  return lam
+}
+
+function _Re(v: number, m: number) {
+  const re = v * 4 * m / (MU_1D / RHO_1D)
+  if (!isFinite(re) || re <= 0) {
+    return 1000 // 安全なデフォルト値（NaN伝播防止）
+  }
+  return re
+}
+function _zetaF(l: number, m: number, Re: number, rr: number) { return _frictionFactor(Re, rr) * l / (4 * m) }
+function _Hf(zeta: number, v1: number, v2: number) { return zeta * (v1 ** 2 + v2 ** 2) / (2 * G) / 2 }
+function _eps(z: number, t: number, r: number) { return (2 * PI_1D * r - z * t) / (2 * PI_1D * r) }
+function _mCyl(z: number, r: number, b: number) {
+  return 2 * PI_1D * r * b / (2 * z * (b + 2 * PI_1D * r / z))
+}
+
+interface EffPoint1D { Q: number; eta: number; etah: number; etal: number; etam: number; Hth: number }
+
+export function calcFrancisEfficiencyCurve(
+  d: NonNullable<TurbineResults['dimensions']['francisDetail']>,
+  H0: number, N: number,
+  numGvoSteps = 10,
+): EffPoint1D[] {
+  // ── 表面粗さ（固定値） ──
+  const rrC = 0.00005, rrS = 0.00005, rrG = 0.00005, rrR = 0.00005, rrD = 0.0001
+
+  const { D1, D5, D6, D2, D7, H2, B1, Vm1, Vm2,
+          beta1b, beta2b, Zr: zR, Zg: zG,
+          Dg1, Dg2, Rg, Bg1: BG1, Bg2: BG2, P00, lg: lG, tg1: tG1, tg2: tG2,
+          Ds1, Ds2, Bs1: BS1, Bs2: BS2, ls: lS, ts1: tS1, ts2: tS2,
+          alphaS1b, alphaS2b,
+          Dc: dC1, lCa,
+          ldc: lDC, rdc1: rDC1, rdc2: rDC2, rdb: rDB, bdb: bDB, hdb2: hDB2, ldd: lDD, bdd: bDD, hdd: hDD,
+          seal, bw_1, bw_2, lw_1, lw_2, rl_1: rw1, rl_2: rw2,
+          guideVaneTable,
+        } = d
+
+  const Dlx = Rg - Dg2 / 2  // lx相当
+
+  // ── 面積・長さ ──
+  const AC   = PI_1D * (dC1 / 2) ** 2
+  const lC   = 2 * PI_1D * (dC1 + Ds1) * 0.5 + lCa
+  const mC   = (PI_1D * (dC1 / 2) ** 2) / (PI_1D * dC1)
+
+  const rS1 = Ds1 / 2, rS2 = Ds2 / 2
+  const AS1 = _eps(zG, tS1, rS1) * 2 * PI_1D * rS1 * BS1
+  const AS2 = _eps(zG, tS2, rS2) * 2 * PI_1D * rS2 * BS2
+  const mS  = (_mCyl(zG, rS1, BS1) + _mCyl(zG, rS2, BS2)) / 2
+
+  const rG1_ = Math.abs(0.5 - (lG - Dlx) / lG)
+  const rG1  = Rg + (rG1_ * Rg) / 2
+  const rG2  = Rg - (rG1_ * Rg) / 5
+  const epG1 = _eps(zG, tG1, rG1)
+  const epG2 = _eps(zG, tG2, rG2)
+  const AG1  = epG1 * 2 * PI_1D * rG1 * BG1
+  const AG2  = epG2 * 2 * PI_1D * rG2 * BG2
+  const mG   = (_mCyl(zG, rG1, BG1) + _mCyl(zG, rG2, BG2)) / 2
+
+  const rm1  = Math.sqrt(((D1 / 2) ** 2 + (D5 / 2) ** 2) / 2)
+  const rm2  = (D2 + D6) / 4
+  const b2   = Math.sqrt(H2 ** 2 + ((D2 - D6) ** 2) / 4)
+  const epR1 = _eps(zR, d.t1, rm1)
+  const epR2 = _eps(zR, d.t2, rm2)
+  const AR1  = epR1 * PI_1D * B1 * ((D1 + D5) * 0.5)
+  const AR2  = (PI_1D * (D2 / 2) ** 2 - PI_1D * (D7 / 2) ** 2) * epR2
+  const mR   = (_mCyl(zR, rm1, B1) + b2 * PI_1D * (D2 + D6) / (2 * zR * (2 * b2 + PI_1D * (D2 + D6) / zR))) / 2
+
+  const AD1  = PI_1D * rDC1 ** 2
+  const ADB1 = PI_1D * rDC2 ** 2
+  const ADB2 = (hDB2 === bDB) ? PI_1D * (bDB / 2) ** 2 : hDB2 * bDB
+  const AD2  = (hDD === bDD) ? PI_1D * (hDD / 2) ** 2 : hDD * bDD
+  const lD   = lDC + 2 * rDB * PI_1D / 4 + lDD
+  const mD   = ((PI_1D * rDC1 ** 2) / (2 * PI_1D * rDC1) + (hDD * bDD) / (2 * (hDD + bDD))) / 2
+
+  const omega = 2 * PI_1D * N / 60
+  const u1    = rm1 * omega
+  const u2    = rm2 * omega
+
+  // スリップ係数
+  const ekK = 1 / Math.exp(8.16 * Math.sin(PI_1D * beta2b / 180) / zR)
+  const FkK = (Math.sin(PI_1D * beta2b / 180) ** 0.5) / (zR ** 0.7)
+  const k   = FkK * 0.2
+
+  const Qdesign = Vm1 * PI_1D * D1 * B1  // 設計流量
+
+  // ── GVOテーブルのうち有効なものを取り出す ──
+  const validGvos = guideVaneTable.filter(row => row.alphaG2b > 0 && row.op > 0)
+  const gvoList = validGvos.length > 0 ? validGvos : guideVaneTable
+
+  const results: EffPoint1D[] = []
+  let Qmax = 0
+
+  for (let ii = gvoList.length - 1; ii >= 0; ii--) {
+    const gvoRow = gvoList[ii]
+    const GVO       = gvoRow.op
+    const alphaG01  = gvoRow.alphaG1b
+    const alphaG2b  = gvoRow.alphaG2b
+    const alphaG02  = gvoRow.alphaG02 * (0.0057 * GVO + 0.242)
+    const P0        = P00 * 0.01 * GVO
+
+    if (alphaG2b <= 0) continue
+
+    let Q  = Qdesign
+    let QQ = 0, HH = 0
+    // 収束後に参照する変数をループ外で宣言
+    let _Hth = 0, _deltaHR = 0, _deltaHS = 0, _deltaHC = 0, _deltaHG = 0
+    let _HDf = 0, _HDe = 0, _HDu = 0, _HDB_ = 0, _etal = 1
+
+    const _t0 = Date.now()
+    for (let jj = 0; jj < 5000; jj++) {
+      // ケーシング損失
+      const vmC = Q / AC
+      const ReC = _Re(vmC, mC)
+      const _zetaC = _zetaF(lC, mC, ReC, rrC)
+      const HCf = _zetaC * vmC ** 2 / (2 * G)
+      const deltaHC = HCf
+
+      // ステーベーン損失
+      const vmS1 = Q / AS1, vmS2 = Q / AS2
+      const wS   = ((vmS1 / Math.sin(PI_1D * alphaS1b / 180)) + (vmS2 / Math.sin(PI_1D * alphaS2b / 180))) / 2
+      const ReS  = _Re(wS, mS)
+      const zetaSf = _zetaF(lS, mS, ReS, rrS)
+      const vS1 = Math.sqrt(vmS1 ** 2 * (1 + (1 / Math.tan(PI_1D * alphaS1b / 180)) ** 2))
+      const vS2 = Math.sqrt(vmS2 ** 2 * (1 + (1 / Math.tan(PI_1D * alphaS2b / 180)) ** 2))
+      const HSf  = _Hf(zetaSf, vS1, vS2)
+      const epS2 = _eps(zG, tS2, rS2)
+      const HSm  = 0.5 * ((vS2 / epS2) ** 2 - vS2 ** 2) / (2 * G)
+      const deltaHS = HSf + HSm
+
+      // ガイドベーン損失（グロス損失で代表）
+      const vag0 = Q / (P0 * zG * BG2)
+      const mGp  = P0 * BG1 * 0.5 / (P0 + BG1)
+      const zetaG = 119.6 * (mGp / D1) ** 2 - 9.5 * (mGp / D1) + 0.2
+      const a_gv = 1.9307 * (P0 / P00) ** 3 - 4.8902 * (P0 / P00) ** 2 + 4.0267 * (P0 / P00) - 0.276
+      const HGgross = (a_gv * zetaG / (2 * G)) * (Q / (zG * P0 * BG1)) ** 2
+      const deltaHG = HGgross
+
+      // ドラフトチューブ損失
+      const vmD1 = Q / AD1, vmD2 = Q / AD2
+      const ReD  = _Re((vmD1 + vmD2) / 2, mD)
+      const zetaDf = _zetaF(lD, mD, ReD, rrD)
+      const HDf  = _Hf(zetaDf, vmD1, vmD2)
+      const HDe  = 0.1 * vmD1 ** 2 / (2 * G)
+      const vmDB = Q / ((ADB1 + ADB2) / 2)
+      const adb  = (rDC2 + bDB / 2) / 2
+      const zetaDB_ = 0.131 + 1.847 * (adb / rDB) ** 3.5
+      const HDB_  = zetaDB_ * vmDB ** 2 / (2 * G)
+
+      // 漏れ収束
+      let deltaQ = 0.00001
+      let Hth = 0, deltaHR = 0, HDu = 0
+      let etal = 1
+
+      for (let kk = 0; kk < 1000; kk++) {
+        const pdQ = deltaQ
+        const QR = Q - deltaQ
+        const vm1 = QR / AR1, vm2 = QR / AR2
+        const vu1_ = vm1 / Math.tan(PI_1D * alphaG02 / 180)
+        const wu1 = u1 - vu1_
+        const beta01_ = wu1 !== 0
+          ? Math.atan(vm1 / Math.abs(wu1)) * 180 / PI_1D * Math.sign(wu1 > 0 ? 1 : -1)
+          : 90
+        const vu2_ = (1 + k) * u2 - vm2 / Math.tan(PI_1D * beta2b / 180)
+        const wu2 = u2 - vu2_
+        const beta02_ = wu2 !== 0 ? Math.atan(vm2 / Math.abs(wu2)) * 180 / PI_1D : 90
+        const w1_ = vm1 / Math.sin(PI_1D * Math.abs(beta01_) / 180 + 1e-9)
+        const w2_ = vm2 / Math.sin(PI_1D * Math.abs(beta02_) / 180 + 1e-9)
+        Hth = (u1 * vu1_ - u2 * vu2_) / G
+
+        const wR  = (w1_ + w2_) / 2
+        const ReR = _Re(wR, mR)
+        const zetaRf = 2 * _zetaF(d.lb ?? lG, mR, ReR, rrR)
+        const HRf = _Hf(zetaRf, w1_, w2_)
+        const vuG2_ = vm2 / Math.tan(PI_1D * alphaG02 / 180)
+        const vvu1_ = u1 - vm1 / Math.tan(PI_1D * Math.abs(beta1b) / 180 + 1e-9)
+        const HRs = 1.0 * ((rG2 / rm1) * vuG2_ - vvu1_) ** 2 / (2 * G)
+        const epR2v = _eps(zR, d.t2, rm2)
+        const va2_ = Math.sqrt(vm2 ** 2 * (1 + (1 / Math.tan(PI_1D * Math.abs(beta02_) / 180 + 1e-9)) ** 2))
+        const HRm = 0.5 * ((va2_ / epR2v) ** 2 - va2_ ** 2) / (2 * G)
+        const Qopt = 0.8 * (Qmax > 0 ? Qmax : Qdesign)
+        const HRn = Q < Qopt ? 0.2 * (u1 ** 2 / (2 * G)) * (1 - Q / Qopt) ** 2 : 0
+        deltaHR = HRf + HRs + HRm + HRn
+
+        HDu = 1.1 * (u2 - w2_ * Math.cos(PI_1D * Math.abs(beta02_) / 180)) ** 2 / (2 * G)
+
+        // 漏れ量（シール2か所）
+        let CwAw = 0
+        const bwArr = [bw_1, bw_2], lwArr = [lw_1, lw_2], rwArr = [rw1, rw2]
+        for (let ll = 0; ll < seal; ll++) {
+          const bw = bwArr[ll], lw = lwArr[ll], rw = rwArr[ll]
+          if (bw * rw * lw < 1e-10) continue
+          const uw  = rw * omega
+          const Rew = 2 * bw * uw / (MU_1D / RHO_1D)
+          const lam = _frictionFactor(Rew, 0.005)
+          const Aw  = PI_1D * ((bw + rw) ** 2 - rw ** 2)
+          const Cw  = 1 / Math.sqrt(lam * lw / (2 * bw) + 1.5)
+          CwAw += (Cw * Aw) ** -2
+        }
+        const uw0 = rw1 * omega
+        const deltaHseal = H0 - (deltaHS + deltaHC + deltaHG + HDf + HDe + HDu + HDB_) - (u1 ** 2 - uw0 ** 2) / (8 * G)
+        if (CwAw > 0 && deltaHseal > 0) {
+          CwAw = (1 / CwAw) ** 0.5
+          deltaQ = CwAw * Math.sqrt(2 * G * deltaHseal) + Q * 0.01
+        } else {
+          deltaQ = Q * 0.02
+        }
+        etal = (Q - deltaQ) / Q
+        if (Math.abs(deltaQ - pdQ) < 5e-5) break
+      }
+
+      // 外部変数に書き戻す
+      _Hth = Hth; _deltaHR = deltaHR; _deltaHS = deltaHS; _deltaHC = deltaHC; _deltaHG = deltaHG
+      _HDf = HDf; _HDe = HDe; _HDu = HDu; _HDB_ = HDB_; _etal = etal
+
+      const H = Hth + deltaHR + deltaHS + deltaHC + deltaHG + HDf + HDe + HDu + HDB_
+      if (Math.abs(H0 - H) < 0.01) break
+
+      if (jj === 0) {
+        const Qd = Q; Q = Q + 0.0006 * (H0 - H); QQ = Qd; HH = H
+      } else {
+        const Qd = Q
+        const denom = H0 - H - (H0 - HH)
+        if (Math.abs(denom) > 1e-10) {
+          Q = Q - 0.8 * (H0 - H) * (Q - QQ) / denom
+          if (Q <= 0) Q = 0.1
+        }
+        QQ = Qd; HH = H
+      }
+    }
+
+    const H_check = _Hth + _deltaHR + _deltaHS + _deltaHC + _deltaHG + _HDf + _HDe + _HDu + _HDB_
+    if (Math.abs(H0 - H_check) > 0.5 || isNaN(Q) || Q <= 0) continue
+
+    if (ii === gvoList.length - 1) Qmax = Q
+
+    // ディスク摩擦損失・機械効率
+    const Rem  = D1 * u1 / (2 * (MU_1D / RHO_1D))
+    const Cf   = 0.0465 / (Rem ** 0.2)
+    const QR_m = Q - 0.02 * Q
+    const Nm   = RHO_1D * G * QR_m * _Hth / 1000
+    const xm   = G * Nm / (D1 ** 2 * u1 ** 3)
+    const deltaN = 2 / 102 * Cf * (RHO_1D / G) * (D1 / 2) ** 5 * omega ** 3
+    const deltax = G * deltaN / (D1 * u1 ** 3)
+    const etam = Math.max(0.9, (xm - deltax) / xm)
+
+    const etah = Math.max(0, Math.min(1, _Hth / H0))
+    const eta  = Math.max(0, Math.min(1, etah * _etal * etam))
+
+    results.push({ Q, eta, etah, etal: _etal, etam, Hth: _Hth })
+  }
+
+  return results.sort((a, b) => a.Q - b.Q)
+}
+
+// ── 効率曲線データ生成（統合版） ──────────────────────────────
+// フランシス水車かつ francisDetail がある場合は 1d損失モデルを使用。
+// その他は従来の簡易2次式。
+export function getEfficiencyCurve(
+  results: TurbineResults,
+  etaT: number,
+  head?: number,
+  ratedRpm?: number,
+): Array<Record<string, number>> {
+  const { turbineType } = results
+  const detail = results.dimensions.francisDetail
+
+  // ── フランシス：1d損失モデル（head/ratedRpm が明示的に渡された場合のみ実行）──
+  // useEffectから明示的に呼ぶ場合のみ有効。useMemoやuseState初期値からは呼ばないこと。
+  if (turbineType === 'フランシス水車' && detail && head !== undefined && ratedRpm !== undefined) {
+    const H0 = head
+    const N  = ratedRpm
+    const pts1d = calcFrancisEfficiencyCurve(detail, H0, N)
+    const Qd = detail.Vm1 * PI * detail.D1 * detail.B1
+    if (pts1d.length >= 3) {
+      return pts1d.map(p => ({
+        q:    Math.round((p.Q / Qd) * 100),
+        eta:  Math.round(p.eta  * 1000) / 10,
+        etah: Math.round(p.etah * 1000) / 10,
+        etal: Math.round(p.etal * 1000) / 10,
+        etam: Math.round(p.etam * 1000) / 10,
+        Q_abs: Math.round(p.Q * 1000) / 1000,
+      }))
+    }
+  }
+
+  // ── フォールバック：簡易2次式（全形式対応） ──
   const configs: Record<TurbineType, { k: number; qPeak: number }> = {
     'ペルトン水車':     { k: 2.5, qPeak: 0.85 },
     'フランシス水車':   { k: 3.0, qPeak: 0.80 },
     'カプラン水車':     { k: 4.0, qPeak: 0.75 },
-    'クロスフロー水車': { k: 2.0, qPeak: 0.75 },  // 広い部分負荷特性
+    'クロスフロー水車': { k: 2.0, qPeak: 0.75 },
     'チューブラ水車':   { k: 3.5, qPeak: 0.78 },
   }
   return Array.from({ length: 81 }, (_, i) => {
     const q = 0.2 + i * 0.01
     const result: Record<string, number> = { q: Math.round(q * 100) }
     for (const [name, cfg] of Object.entries(configs)) {
-      const eta = etaT * (1 - cfg.k * Math.pow(q - cfg.qPeak, 2))
+      const eta = etaT * (1 - cfg.k * (q - cfg.qPeak) ** 2)
       result[name] = Math.max(0, Math.min(100, eta * 100))
     }
     return result
   })
+}
+
+// ── 効率曲線（H0・Q設計点を明示したフランシス版） ──────────────
+export function getFrancisEfficiencyCurveWithH0(
+  detail: NonNullable<TurbineResults['dimensions']['francisDetail']>,
+  H0: number, N: number,
+): Array<{ q: number; eta: number; etah: number; etal: number; etam: number; Q_abs: number }> {
+  const pts = calcFrancisEfficiencyCurve(detail, H0, N)
+  const Qd  = detail.Vm1 * PI * detail.D1 * detail.B1
+  return pts.map(p => ({
+    q:     Math.round((p.Q / Qd) * 100),
+    eta:   Math.round(p.eta * 1000) / 10,
+    etah:  Math.round(p.etah * 1000) / 10,
+    etal:  Math.round(p.etal * 1000) / 10,
+    etam:  Math.round(p.etam * 1000) / 10,
+    Q_abs: Math.round(p.Q * 1000) / 1000,
+  }))
 }
 
 // ── ヒルチャート（N11-Q11-η 性能曲線）データ生成 ──────────────

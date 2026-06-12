@@ -67,7 +67,7 @@ export default function FrancisHillChart({ results, inputs }: Props) {
       svg.selectAll('*').remove()
 
       const W = svgRef.current!.clientWidth || 640
-      const H = 620
+      const H = 520  // was 480
       const ml=54, mr=85, mt=38, mb=50
       const pw = W-ml-mr, ph = H-mt-mb
 
@@ -359,77 +359,11 @@ export default function FrancisHillChart({ results, inputs }: Props) {
         )}
       </div>
 
-      {/* 計算ボタン・ダウンロードボタン */}
+      {/* 計算ボタン */}
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
         <button onClick={compute} disabled={computing} style={btnStyle(computing)}>
           {computing?'⏳ 計算中...':'▶ ヒルチャートを計算'}
         </button>
-
-        {data && data.length > 0 && (<>
-          {/* SVGダウンロード */}
-          <button
-            onClick={() => {
-              if (!svgRef.current) return
-              const svgEl = svgRef.current
-              const svgW = svgEl.clientWidth || 640
-              const svgH = parseInt(svgEl.getAttribute('height') || '620')
-              const clone = svgEl.cloneNode(true) as SVGSVGElement
-              clone.setAttribute('width',  String(svgW))
-              clone.setAttribute('height', String(svgH))
-              clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-              const svgStr = new XMLSerializer().serializeToString(clone)
-              const blob = new Blob(
-                ['<?xml version="1.0" encoding="UTF-8"?>\n' + svgStr],
-                { type: 'image/svg+xml;charset=utf-8' }
-              )
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url; a.download = 'hill_chart.svg'; a.click()
-              URL.revokeObjectURL(url)
-            }}
-            style={{...btnStyle(false), padding:'4px 12px'}}>
-            ⬇ SVG
-          </button>
-
-          {/* PNGダウンロード（2倍解像度） */}
-          <button
-            onClick={() => {
-              if (!svgRef.current) return
-              const svgEl = svgRef.current
-              const svgW = svgEl.clientWidth || 640
-              const svgH = parseInt(svgEl.getAttribute('height') || '620')
-              const scale = 2
-              const clone = svgEl.cloneNode(true) as SVGSVGElement
-              clone.setAttribute('width',  String(svgW))
-              clone.setAttribute('height', String(svgH))
-              clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-              const svgStr = new XMLSerializer().serializeToString(clone)
-              const url = URL.createObjectURL(
-                new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
-              )
-              const img = new Image()
-              img.width  = svgW
-              img.height = svgH
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width  = svgW * scale
-                canvas.height = svgH * scale
-                const ctx = canvas.getContext('2d')!
-                ctx.fillStyle = '#ffffff'
-                ctx.fillRect(0, 0, canvas.width, canvas.height)
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-                URL.revokeObjectURL(url)
-                const a = document.createElement('a')
-                a.href = canvas.toDataURL('image/png')
-                a.download = 'hill_chart.png'; a.click()
-              }
-              img.src = url
-            }}
-            style={{...btnStyle(false), padding:'4px 12px'}}>
-            ⬇ PNG
-          </button>
-        </>)}
-
         {status && (
           <span style={{fontSize:11,fontFamily:'monospace',
             color:'var(--color-text-secondary,#888)'}}>{status}</span>
