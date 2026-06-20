@@ -26,6 +26,7 @@
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^2.12.7",
+    "stl-exporter": "^0.3.6",
     "tailwind-merge": "^2.4.0",
     "three": "^0.128.0",
     "xlsx": "^0.18.5"

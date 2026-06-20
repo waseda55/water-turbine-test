@@ -1,3 +1,5 @@
+
+
 'use client'
 // ============================================================
 // フランシス水車 Q-η曲線 + 損失内訳チャート
@@ -118,8 +120,9 @@ export default function FrancisQEtaChart({ results, head, flowRate, ratedRpm, tu
               ['rrR', 'ランナ'],     ['rrD', 'ドラフトチューブ'], ['rrW', 'シール（固定）'],
             ] as [keyof RoughnessParams, string][]).map(([key, label]) => (
               <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <label style={{ fontSize: 10, fontFamily: 'monospace',
-                  color: 'var(--color-text-secondary,#888)' }}>{label}（{key}）</label>
+                <label style={{ fontSize: 10, fontFamily: 'monospace' }}>
+                  {label}
+                </label>
                 <input type="number" step="0.000001" min="0" max="0.1"
                   value={rp[key]}
                   onChange={e => setRp(p => ({ ...p, [key]: parseFloat(e.target.value) || 0 }))}
@@ -155,12 +158,12 @@ export default function FrancisQEtaChart({ results, head, flowRate, ratedRpm, tu
         <>
           {/* ── Q-η曲線 ── */}
           <div style={{ border: '1px solid var(--color-border-tertiary,#ddd)',
-            borderRadius: 6, padding: '12px 8px' }}>
+            borderRadius: 6, padding: '12px 8px', height: 640 }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10,
               fontFamily: 'monospace', color: 'var(--color-text-primary,#333)' }}>
               Q–η曲線（流量–効率曲線）
             </div>
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}
                 margin={{ top: 8, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3"
@@ -208,12 +211,12 @@ export default function FrancisQEtaChart({ results, head, flowRate, ratedRpm, tu
 
           {/* ── 損失内訳（積み上げ棒グラフ）── */}
           <div style={{ border: '1px solid var(--color-border-tertiary,#ddd)',
-            borderRadius: 6, padding: '12px 8px' }}>
+            borderRadius: 6, padding: '12px 8px', height: 640}}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10,
               fontFamily: 'monospace', color: 'var(--color-text-primary,#333)' }}>
               損失内訳 θ [% of H₀]
             </div>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}
                 margin={{ top: 8, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3"

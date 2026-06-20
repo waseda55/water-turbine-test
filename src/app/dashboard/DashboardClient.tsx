@@ -555,13 +555,14 @@ export default function DashboardClient(_props: Props) {
       try {
         const pts = calcFrancisEfficiencyCurve(detail!, inputs.head, results.ratedRpm)
         if (pts.length >= 3) {
-          setFrancis1dData(pts.map(p => ({
+          const mapped = pts.map(p => ({
             Q:    Math.round(p.Q * 1000) / 1000,
             eta:  Math.round(p.eta  * 1000) / 10,
             etah: Math.round(p.etah * 1000) / 10,
             etal: Math.round(p.etal * 1000) / 10,
             etam: Math.round(p.etam * 1000) / 10,
-          })))
+          }))
+          setFrancis1dData(mapped)
         } else {
           setFrancis1dData(null)
         }
@@ -1103,9 +1104,19 @@ export default function DashboardClient(_props: Props) {
                     <LineChart data={francis1dData ?? effData} margin={{ top: 4, right: 8, left: -10, bottom: 16 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       {francis1dData ? (
-                        <XAxis dataKey="Q" type="number" domain={['auto','auto']} tickCount={6}
+                        <XAxis dataKey="Q" type="number"
+                          domain={([dataMin, dataMax]: [number, number]) => [Math.floor(dataMin), Math.ceil(dataMax)]}
+                          ticks={(() => {
+                            if (!francis1dData || francis1dData.length === 0) return []
+                            const vals = francis1dData.map((d: Record<string,number>) => d.Q).filter(isFinite)
+                            const lo = Math.floor(Math.min(...vals))
+                            const hi = Math.ceil(Math.max(...vals))
+                            const t = []
+                            for (let v = lo; v <= hi; v++) t.push(v)
+                            return t
+                          })()}
                           tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }}
-                          tickFormatter={(v: number) => Number.isInteger(v) ? v.toString() : v.toFixed(1)}
+                          tickFormatter={(v: number) => v.toFixed(0)}
                           label={{ value: 'Q [m³/s]', position: 'insideBottom', offset: -6, fontSize: 10, fill: 'var(--muted)' }} />
                       ) : (
                         <XAxis dataKey="q" tick={{ fontSize: 10, fill: 'var(--muted)', fontFamily: 'JetBrains Mono' }} tickFormatter={v => v + '%'}

@@ -72,7 +72,7 @@ function beta01(vm1: number, vu1v: number, u1: number): number {
   return 180 - Math.atan(vm1/(vu1v-u1))*180/PI
 }
 function slipFactor(beta2b: number, zR: number, D1: number, D2: number) {
-  const ek = 1/Math.exp(8.16*Math.sin(PI*beta2b/180)/zR)
+  const ek = 1/Math.exp(8.16*Math.sin(PI*beta2b/180/zR))
   let Fk = Math.sin(PI*beta2b/180)**0.5 / zR**0.7
   if (ek < D2/D1) Fk = 1-(1-Fk)*(1-((D2/D1-ek)**3)/(1-ek)**3)
   return Fk*0.2
@@ -95,8 +95,8 @@ function reynolds(w: number, m: number) { return w*4*m/(MU/RHO) }
 function frictionFactor(Re: number, rr: number): number {
   if (Re < 2000) return 64/Re
   if (Re > 4000) {
-    let f = 0.02
-    for (let i=0;i<200;i++) {
+    let f = 0.001
+    for (let i=0;i<20000;i++) {
       const ff = 1/Math.sqrt(f) + 2*Math.log10(rr/3.71 + 2.51/Re/Math.sqrt(f))
       const df = -0.5*f**-1.5 - 2.51/(Re*Math.log(10))*f**-1.5/(rr/3.71+2.51/Re/Math.sqrt(f))
       const fn = f - ff/df
@@ -110,7 +110,10 @@ function frictionFactor(Re: number, rr: number): number {
 function zetaFriction(l: number, m: number, Re: number, rr: number) { return frictionFactor(Re,rr)*l/(4*m) }
 function lossFriction(zf: number, v1: number, v2: number)  { return zf*(v1**2+v2**2)/(2*G)/2 }
 function lossFrictionCsg(zf: number, vm: number)            { return zf*vm**2/(2*G) }
-function lossShockSv(vus1: number)                          { return 0.5*(vus1-vus1)**2/(2*G) }  // =0 (symmetric)
+function lossShockSv(vus1: number, vvus1: number) {
+  const zetaSs = 0.5
+  return zetaSs * (vus1 - vvus1)**2 / (2 * G)
+}
 function lossShockGv(rs2: number, rg1: number, vus2: number, vug0: number) {
   return 0.5*((rs2/rg1)*vus2 - vug0)**2/(2*G)
 }
@@ -218,7 +221,7 @@ export function calcQEtaCurve(
   const output: QEtaPoint[] = []
 
   let Q_guess = Qcr
-  let Qmax = Qcr*1.5
+  let Qmax = Qcr*1.2
 
   for (let ii=9; ii>=0; ii--) {
     const GVO = GVOi[ii]
@@ -265,7 +268,9 @@ export function calcQEtaCurve(
       const vaS1=Math.sqrt(vmS1**2*(1+(1/Math.tan(PI*alphaS1b/180))**2))
       const vaS2=Math.sqrt(vmS2**2*(1+(1/Math.tan(PI*alphaS2b/180))**2))
       HSf = lossFriction(zetaSf,vaS1,vaS2)
-      HSs = 0  // lossShockSv: symmetric = 0
+      const vuS1 = calcV(vmS1, alphaS1b)
+      const vvuS1 = calcV(vmS1, alphaS1b)  // Python と同じ式を渡すか、実際の vvuS1 を計算して渡す
+      HSs = lossShockSv(vuS1, vvuS1)
       const vaS2m = vAbsRv2(vmS2,alphaS2b)
       const HSmv = lossMixing(epsS2,vaS2m)
       dHS = HSf + HSs + HSmv
@@ -277,8 +282,8 @@ export function calcQEtaCurve(
       const zetaGf=zetaFriction(lG,mG,reynolds(wvG,mG),rp.rrG)
       const vag0=Q/(P0*zG*BG2)
       HGf = zetaGf*vag0**2/(2*G)
-      const vuS2=calcV(vmS2*(AS2/AG1),alphaS2b)
-      HGs = lossShockGv(rS2,rG1,vuS2,calcV(vag0,alphaG1bi[ii]))
+      const vuS2=calcV(vmS2,alphaS2b)
+      HGs = lossShockGv(rS2,rG1,vuS2,calcV(vmG1,alphaG1bi[ii]))
       const vaG2=Math.sqrt((Q/(2*PI*rG2*BG2))**2*(1+(1/Math.tan(PI*alphaG02/180))**2))
       HGm = lossMixing(epsG2,vaG2)
       dHG = lossGrossGv(Q,zG,P0,P00,BG1,D1)

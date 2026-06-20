@@ -781,7 +781,8 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
 // 各損失θ = H_loss / H0（無次元化）をGVO別に積み上げて η を計算する
 const RHO_1D = 998.2
 const MU_1D  = 0.001004
-const PI_1D  = Math.PI
+const PI_1D  = 3.14159   // ★Math.PIではなくPython版の定数(pi=3.14159)に合わせる
+const G_1D   = 9.80663   // ★汎用G(=9.81)とは別に、Python版の定数(g=9.80663)を使う
 
 function _frictionFactor(Re: number, rr: number): number {
   if (!isFinite(Re) || Re <= 0) return 0.02
@@ -812,7 +813,7 @@ function _Re(v: number, m: number) {
   return re
 }
 function _zetaF(l: number, m: number, Re: number, rr: number) { return _frictionFactor(Re, rr) * l / (4 * m) }
-function _Hf(zeta: number, v1: number, v2: number) { return zeta * (v1 ** 2 + v2 ** 2) / (2 * G) / 2 }
+function _Hf(zeta: number, v1: number, v2: number) { return zeta * (v1 ** 2 + v2 ** 2) / (2 * G_1D) / 2 }
 function _eps(z: number, t: number, r: number) { return (2 * PI_1D * r - z * t) / (2 * PI_1D * r) }
 function _mCyl(z: number, r: number, b: number) {
   return 2 * PI_1D * r * b / (2 * z * (b + 2 * PI_1D * r / z))
@@ -880,10 +881,13 @@ export function calcFrancisEfficiencyCurve(
   const u1    = rm1 * omega
   const u2    = rm2 * omega
 
-  // スリップ係数
-  const ekK = 1 / Math.exp(8.16 * Math.sin(PI_1D * beta2b / 180) / zR)
-  const FkK = (Math.sin(PI_1D * beta2b / 180) ** 0.5) / (zR ** 0.7)
-  const k   = FkK * 0.2
+  // スリップ係数（Python: calc_slip_factor(beta2b, zR, 2*rm1, 2*rm2, pi) を厳密に再現）
+  const ekK = 1 / Math.exp(8.16 * Math.sin(PI_1D * beta2b / 180 / zR))
+  let FkK = (Math.sin(PI_1D * beta2b / 180) ** 0.5) / (zR ** 0.7)
+  if (ekK < ((2 * rm2) / (2 * rm1))) {
+    FkK = 1 - (1 - FkK) * (1 - (((2 * rm2) / (2 * rm1) - ekK) ** 3) / ((1 - ekK) ** 3))
+  }
+  const k = FkK * 0.2
 
   const Qdesign = Vm1 * PI_1D * D1 * B1  // 設計流量
 
@@ -893,6 +897,7 @@ export function calcFrancisEfficiencyCurve(
 
   const results: EffPoint1D[] = []
   let Qmax = 0
+  let Q_guess = Qdesign  // Python: Q_guess = Qcr （GVOループの外で初期化）
 
   for (let ii = gvoList.length - 1; ii >= 0; ii--) {
     const gvoRow = gvoList[ii]
@@ -904,19 +909,25 @@ export function calcFrancisEfficiencyCurve(
 
     if (alphaG2b <= 0) continue
 
-    let Q  = Qdesign
+    let Q  = Q_guess  // Python: Q = Q_guess （前ステップの収束値を初期値に使う）
     let QQ = 0, HH = 0
     // 収束後に参照する変数をループ外で宣言
     let _Hth = 0, _deltaHR = 0, _deltaHS = 0, _deltaHC = 0, _deltaHG = 0
+    let _QR = 0
     let _HDf = 0, _HDe = 0, _HDu = 0, _HDB_ = 0, _etal = 1
+    let _HCf = 0, _HSf = 0, _HSm = 0, _HGgross = 0
+    let _HRf = 0, _HRs = 0, _HRm = 0, _HRn = 0
+    let _deltaQ = 0
+    let _vu1_ = 0, _vu2_ = 0, _beta01_ = 0, _beta02_ = 0
+
 
     const _t0 = Date.now()
-    for (let jj = 0; jj < 5000; jj++) {
+    for (let jj = 0; jj < 100000; jj++) {
       // ケーシング損失
       const vmC = Q / AC
       const ReC = _Re(vmC, mC)
       const _zetaC = _zetaF(lC, mC, ReC, rrC)
-      const HCf = _zetaC * vmC ** 2 / (2 * G)
+      const HCf = _zetaC * vmC ** 2 / (2 * G_1D)
       const deltaHC = HCf
 
       // ステーベーン損失
@@ -928,7 +939,7 @@ export function calcFrancisEfficiencyCurve(
       const vS2 = Math.sqrt(vmS2 ** 2 * (1 + (1 / Math.tan(PI_1D * alphaS2b / 180)) ** 2))
       const HSf  = _Hf(zetaSf, vS1, vS2)
       const epS2 = _eps(zG, tS2, rS2)
-      const HSm  = 0.5 * ((vS2 / epS2) ** 2 - vS2 ** 2) / (2 * G)
+      const HSm  = 0.5 * ((vS2 / epS2) ** 2 - vS2 ** 2) / (2 * G_1D)
       const deltaHS = HSf + HSm
 
       // ガイドベーン損失（グロス損失で代表）
@@ -936,7 +947,7 @@ export function calcFrancisEfficiencyCurve(
       const mGp  = P0 * BG1 * 0.5 / (P0 + BG1)
       const zetaG = 119.6 * (mGp / D1) ** 2 - 9.5 * (mGp / D1) + 0.2
       const a_gv = 1.9307 * (P0 / P00) ** 3 - 4.8902 * (P0 / P00) ** 2 + 4.0267 * (P0 / P00) - 0.276
-      const HGgross = (a_gv * zetaG / (2 * G)) * (Q / (zG * P0 * BG1)) ** 2
+      const HGgross = (a_gv * zetaG / (2 * G_1D)) * (Q / (zG * P0 * BG1)) ** 2
       const deltaHG = HGgross
 
       // ドラフトチューブ損失
@@ -944,11 +955,11 @@ export function calcFrancisEfficiencyCurve(
       const ReD  = _Re((vmD1 + vmD2) / 2, mD)
       const zetaDf = _zetaF(lD, mD, ReD, rrD)
       const HDf  = _Hf(zetaDf, vmD1, vmD2)
-      const HDe  = 0.1 * vmD1 ** 2 / (2 * G)
+      const HDe  = 0.1 * vmD1 ** 2 / (2 * G_1D)
       const vmDB = Q / ((ADB1 + ADB2) / 2)
       const adb  = (rDC2 + bDB / 2) / 2
       const zetaDB_ = 0.131 + 1.847 * (adb / rDB) ** 3.5
-      const HDB_  = zetaDB_ * vmDB ** 2 / (2 * G)
+      const HDB_  = zetaDB_ * vmDB ** 2 / (2 * G_1D)
 
       // 漏れ収束
       let deltaQ = 0.00001
@@ -958,53 +969,59 @@ export function calcFrancisEfficiencyCurve(
       for (let kk = 0; kk < 1000; kk++) {
         const pdQ = deltaQ
         const QR = Q - deltaQ
+        _QR = QR
         const vm1 = QR / AR1, vm2 = QR / AR2
         const vu1_ = vm1 / Math.tan(PI_1D * alphaG02 / 180)
-        const wu1 = u1 - vu1_
-        const beta01_ = wu1 !== 0
-          ? Math.atan(vm1 / Math.abs(wu1)) * 180 / PI_1D * Math.sign(wu1 > 0 ? 1 : -1)
-          : 90
+        const beta01_ = u1 > vu1_
+          ? Math.atan(vm1 / (u1 - vu1_)) * 180 / PI_1D
+          : (vu1_ === 0 ? 90 : 180 - Math.atan(vm1 / (vu1_ - u1)) * 180 / PI_1D)
         const vu2_ = (1 + k) * u2 - vm2 / Math.tan(PI_1D * beta2b / 180)
-        const wu2 = u2 - vu2_
-        const beta02_ = wu2 !== 0 ? Math.atan(vm2 / Math.abs(wu2)) * 180 / PI_1D : 90
-        const w1_ = vm1 / Math.sin(PI_1D * Math.abs(beta01_) / 180 + 1e-9)
-        const w2_ = vm2 / Math.sin(PI_1D * Math.abs(beta02_) / 180 + 1e-9)
-        Hth = (u1 * vu1_ - u2 * vu2_) / G
+        const beta02_ = Math.atan(vm2 / (u2 - vu2_)) * 180 / PI_1D
+        const w1_ = vm1 / Math.sin(PI_1D * beta01_ / 180)
+        const w2_ = vm2 / Math.sin(PI_1D * beta02_ / 180)
+        Hth = (u1 * vu1_ - u2 * vu2_) / G_1D
+        _vu1_ = vu1_; _vu2_ = vu2_; _beta01_ = beta01_; _beta02_ = beta02_
 
         const wR  = (w1_ + w2_) / 2
         const ReR = _Re(wR, mR)
         const zetaRf = 2 * _zetaF(d.lb ?? lG, mR, ReR, rrR)
         const HRf = _Hf(zetaRf, w1_, w2_)
-        const vuG2_ = vm2 / Math.tan(PI_1D * alphaG02 / 180)
-        const vvu1_ = u1 - vm1 / Math.tan(PI_1D * Math.abs(beta1b) / 180 + 1e-9)
-        const HRs = 1.0 * ((rG2 / rm1) * vuG2_ - vvu1_) ** 2 / (2 * G)
+        const vmG2 = Q / AG2
+        const vuG2_ = vmG2 / Math.tan(PI_1D * alphaG02 / 180)
+        //const vuG2_ = vm2 / Math.tan(PI_1D * alphaG02 / 180)
+        const vvu1_ = u1 - vm1 / Math.tan(PI_1D * beta1b / 180)
+        const HRs = 1.0 * ((rG2 / rm1) * vuG2_ - vvu1_) ** 2 / (2 * G_1D)
         const epR2v = _eps(zR, d.t2, rm2)
-        const va2_ = Math.sqrt(vm2 ** 2 * (1 + (1 / Math.tan(PI_1D * Math.abs(beta02_) / 180 + 1e-9)) ** 2))
-        const HRm = 0.5 * ((va2_ / epR2v) ** 2 - va2_ ** 2) / (2 * G)
-        const Qopt = 0.8 * (Qmax > 0 ? Qmax : Qdesign)
-        const HRn = Q < Qopt ? 0.2 * (u1 ** 2 / (2 * G)) * (1 - Q / Qopt) ** 2 : 0
-        deltaHR = HRf + HRs + HRm + HRn
+        const va2_ = Math.sqrt(vm2 ** 2 * (1 + (1 / Math.tan(PI_1D * beta02_ / 180)) ** 2))
+        const HRm = 0.5 * ((va2_ / epR2v) ** 2 - va2_ ** 2) / (2 * G_1D)
+        const Qopt = Qmax > 0 ? 0.8 * Qmax : 0
+        //const HRn = Qopt > 0 && Q < Qopt ? 0.2 * (u1 ** 2 / (2 * G_1D)) * (1 - Q / Qopt) ** 2 : 0
+        //deltaHR = HRf + HRs + HRm + HRn
+        const HRn = Qopt > 0 && Q < Qopt ? 0.2 * (u1 ** 2 / (2 * G_1D)) * (1 - Q / Qopt) ** 2 : 0
+              _HRf = HRf; _HRs = HRs; _HRm = HRm; _HRn = HRn
+              deltaHR = HRf + HRs + HRm + HRn
 
-        HDu = 1.1 * (u2 - w2_ * Math.cos(PI_1D * Math.abs(beta02_) / 180)) ** 2 / (2 * G)
+        HDu = 1.1 * (u2 - w2_ * Math.cos(PI_1D * beta02_ / 180)) ** 2 / (2 * G_1D)
 
         // 漏れ量（シール2か所）
         let CwAw = 0
+        let uw = 0   // ★ループ外に保持：Pythonは「最後に有効だったシールのuw」を使うため、
+                     //   有効なシールが処理されるたびに上書きする（rw1固定にしない）
         const bwArr = [bw_1, bw_2], lwArr = [lw_1, lw_2], rwArr = [rw1, rw2]
         for (let ll = 0; ll < seal; ll++) {
           const bw = bwArr[ll], lw = lwArr[ll], rw = rwArr[ll]
           if (bw * rw * lw < 1e-10) continue
-          const uw  = rw * omega
+          uw = rw * omega
           const Rew = 2 * bw * uw / (MU_1D / RHO_1D)
           const lam = _frictionFactor(Rew, 0.005)
           const Aw  = PI_1D * ((bw + rw) ** 2 - rw ** 2)
           const Cw  = 1 / Math.sqrt(lam * lw / (2 * bw) + 1.5)
           CwAw += (Cw * Aw) ** -2
         }
-        const uw0 = rw1 * omega
-        const deltaHseal = H0 - (deltaHS + deltaHC + deltaHG + HDf + HDe + HDu + HDB_) - (u1 ** 2 - uw0 ** 2) / (8 * G)
+        const deltaHseal = H0 - (deltaHS + deltaHC + deltaHG + HDf + HDe + HDu + HDB_) - (u1 ** 2 - uw ** 2) / (8 * G_1D)
         if (CwAw > 0 && deltaHseal > 0) {
           CwAw = (1 / CwAw) ** 0.5
-          deltaQ = CwAw * Math.sqrt(2 * G * deltaHseal) + Q * 0.01
+          deltaQ = CwAw * Math.sqrt(2 * G_1D * deltaHseal) + Q * 0.01
         } else {
           deltaQ = Q * 0.02
         }
@@ -1015,9 +1032,13 @@ export function calcFrancisEfficiencyCurve(
       // 外部変数に書き戻す
       _Hth = Hth; _deltaHR = deltaHR; _deltaHS = deltaHS; _deltaHC = deltaHC; _deltaHG = deltaHG
       _HDf = HDf; _HDe = HDe; _HDu = HDu; _HDB_ = HDB_; _etal = etal
+      _HCf = HCf; _HSf = HSf; _HSm = HSm; _HGgross = HGgross
+      _deltaQ = deltaQ
+      //_Hth = Hth; _deltaHR = deltaHR; _deltaHS = deltaHS; _deltaHC = deltaHC; _deltaHG = deltaHG
+      //_HDf = HDf; _HDe = HDe; _HDu = HDu; _HDB_ = HDB_; _etal = etal
 
       const H = Hth + deltaHR + deltaHS + deltaHC + deltaHG + HDf + HDe + HDu + HDB_
-      if (Math.abs(H0 - H) < 0.01) break
+      if (Math.abs(H0 - H) < 0.00001) break
 
       if (jj === 0) {
         const Qd = Q; Q = Q + 0.0006 * (H0 - H); QQ = Qd; HH = H
@@ -1033,19 +1054,20 @@ export function calcFrancisEfficiencyCurve(
     }
 
     const H_check = _Hth + _deltaHR + _deltaHS + _deltaHC + _deltaHG + _HDf + _HDe + _HDu + _HDB_
-    if (Math.abs(H0 - H_check) > 0.5 || isNaN(Q) || Q <= 0) continue
+    if (Math.abs(H0 - H_check) > 0.1 || isNaN(Q) || Q <= 0) continue
+    Q_guess = Q  // Python: Q_guess = Q （収束したQを次回の初期値として保存）
 
     if (ii === gvoList.length - 1) Qmax = Q
 
     // ディスク摩擦損失・機械効率
     const Rem  = D1 * u1 / (2 * (MU_1D / RHO_1D))
     const Cf   = 0.0465 / (Rem ** 0.2)
-    const QR_m = Q - 0.02 * Q
-    const Nm   = RHO_1D * G * QR_m * _Hth / 1000
-    const xm   = G * Nm / (D1 ** 2 * u1 ** 3)
-    const deltaN = 2 / 102 * Cf * (RHO_1D / G) * (D1 / 2) ** 5 * omega ** 3
-    const deltax = G * deltaN / (D1 * u1 ** 3)
-    const etam = Math.max(0.9, (xm - deltax) / xm)
+    const QR_m = _QR
+    const Nm   = RHO_1D * G_1D * QR_m * _Hth / 1000
+    const xm   = G_1D * Nm / (D1 ** 2 * u1 ** 3)
+    const deltaN = 2 / 102 * Cf * (RHO_1D / G_1D) * (D1 / 2) ** 5 * omega ** 3
+    const deltax = G_1D * deltaN / (D1 * u1 ** 3)
+    const etam = (xm - deltax) / xm
 
     const etah = Math.max(0, Math.min(1, _Hth / H0))
     const eta  = Math.max(0, Math.min(1, etah * _etal * etam))
