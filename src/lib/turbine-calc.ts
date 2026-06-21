@@ -414,6 +414,13 @@ function calcFrancisDetailedParams(
   const Vm2      = 4 * Q / (PI * (D2 ** 2 - D6 ** 2))
   const beta2b   = Math.atan(Vm2 / U_outlet) * 180 / PI
 
+  // Python準拠: クラウン側出口角（D6基準）・バンド側出口角（D2基準）
+  // ※ Vm2は上記のTS既存値（環状断面 D2²-D6²）をそのまま使用し、内部整合性を優先
+  const U6     = PI * D6 * N / 60
+  const beta2h = Math.atan(Vm2 / U6) * 180 / PI
+  const U2     = PI * D2 * N / 60
+  const beta2s = Math.atan(Vm2 / U2) * 180 / PI
+
   // ── ガイドベーン ──
   const kDg1 = 1.2817934656e-5 * Nsp ** 2 - 0.001219602867175  * Nsp + 1.221638424287550
   const Dg1  = kDg1 * D1
@@ -550,6 +557,8 @@ function calcFrancisDetailedParams(
     alpha1,
     beta1b,
     beta2b,
+    beta2h,
+    beta2s,
     lb: lb_correct,
     Zr, t1, t2,
     Dg1, Dg2, Rg, Dlx, Bg1, Bg2,

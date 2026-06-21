@@ -33,9 +33,14 @@ export function FrancisMeridional({ results }: Props) {
   const r7 = D7 / 2
 
   // 代表点
+  // D6のz位置: (r5-r6)/(r5-r2) を直線近似の比率として使うが、
+  // D6半径がD2半径より小さいケースでは比率が1を超えてD2を飛び越し、
+  // 自己交差を起こすため0.15〜0.85にクランプする（暫定対応）
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+  const tD6 = clamp((r5 - r6) / (r5 - r2), 0.15, 0.85)
   const p1 = { r: r1, z: 0 }        // D1: クラウン入口
   const p5 = { r: r5, z: B1 }       // D5: バンド入口
-  const p6 = { r: r6, z: B1 + H2 * (r5 - r6) / (r5 - r2) }  // D6: クラウン出口（D1-D2直線上の近似）
+  const p6 = { r: r6, z: B1 + H2 * tD6 }  // D6: クラウン出口（D1-D2直線上の近似、クランプ済み）
   const p2 = { r: r2, z: B1 + H2 }  // D2: バンド出口
   const p7 = { r: r7, z: B1 + H2 }  // D7: ボス（D2と同じz）
 
@@ -57,6 +62,9 @@ export function FrancisMeridional({ results }: Props) {
   const sD7 = { x: px(p7.r), y: pz(p7.z) }
 
   // ベジェ制御点
+  // β角度ベースの接線方向を試したが、実際の入力値（特にD5≈D2となる
+  // 高Nsp域）で曲線が直線化したり、極端な比率で破綻することが判明したため撤回。
+  // 元の固定比率（Francis断面図.png 確定版で目視検証済み）に戻す。
   // クラウン D1→D6: 左上膨らみ
   const cC1 = { x: sD1.x + (sD6.x - sD1.x) * 0.15, y: sD1.y + (sD6.y - sD1.y) * 0.10 }
   const cC2 = { x: sD6.x + (sD1.x - sD6.x) * 0.10, y: sD6.y - (sD6.y - sD1.y) * 0.30 }
@@ -75,13 +83,13 @@ export function FrancisMeridional({ results }: Props) {
     `L ${sD1.x} ${sD1.y} Z`,
   ].join(' ')
 
-  // D6-D2-D5-D1 で囲まれた台形（色付き）
+  // 塗りつぶし用パス: D1-D6-D2-D5（D7は通らず、D6-D2を直線で結ぶ）
   const innerPath = [
-    `M ${sD6.x} ${sD6.y}`,
+    `M ${sD1.x} ${sD1.y}`,
+    `C ${cC1.x} ${cC1.y}, ${cC2.x} ${cC2.y}, ${sD6.x} ${sD6.y}`,
     `L ${sD2.x} ${sD2.y}`,
     `C ${bC2.x} ${bC2.y}, ${bC1.x} ${bC1.y}, ${sD5.x} ${sD5.y}`,
-    `L ${sD1.x} ${sD1.y}`,
-    `L ${sD6.x} ${sD6.y} Z`,
+    `L ${sD1.x} ${sD1.y} Z`,
   ].join(' ')
 
   const C_D1 = '#1560BD'
@@ -187,9 +195,12 @@ export function FrancisMeridional({ results }: Props) {
             stroke="#e5e7eb" strokeWidth="0.6" strokeDasharray="4 3"/>
         ))}
 
-        {/* 全体を緑で塗り、輪郭線は黒 */}
+        {/* 塗りつぶし: D1-D6-D2-D5（D7-D6-D2の領域は塗らない） */}
+        <path d={innerPath} fill="#4ADE80" fillOpacity="0.55" stroke="none" />
+
+        {/* 輪郭線: D7を含む全体外形（線のみ） */}
         <path d={bladePath}
-          fill="#4ADE80" fillOpacity="0.55"
+          fill="none"
           stroke="#1e293b" strokeWidth="2.2" strokeLinejoin="round" />
 
         {/* D6-D2線を太く強調 */}

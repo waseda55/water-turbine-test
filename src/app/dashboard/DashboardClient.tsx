@@ -554,14 +554,15 @@ export default function DashboardClient(_props: Props) {
       if (cancelled) return
       try {
         const pts = calcFrancisEfficiencyCurve(detail!, inputs.head, results.ratedRpm)
-        if (pts.length >= 3) {
+        if (pts.length >= 3) { 
           const mapped = pts.map(p => ({
             Q:    Math.round(p.Q * 1000) / 1000,
-            eta:  Math.round(p.eta  * 1000) / 10,
+             eta:  Math.round(p.eta  * 1000) / 10,
             etah: Math.round(p.etah * 1000) / 10,
             etal: Math.round(p.etal * 1000) / 10,
             etam: Math.round(p.etam * 1000) / 10,
           }))
+          console.log('[効率曲線] プロット点 (Q, eta):', mapped.map(p => ({ Q: p.Q, eta: p.eta })))
           setFrancis1dData(mapped)
         } else {
           setFrancis1dData(null)
