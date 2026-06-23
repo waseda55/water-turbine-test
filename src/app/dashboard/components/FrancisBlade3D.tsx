@@ -147,11 +147,31 @@ export function FrancisBlade3D({ results }: Props) {
         const tScale = CHORD * tcPct / 100
         const upper: number[] = [], lower: number[] = []
         for (let js = 0; js <= nS; js++) {
-          const sv = js/nS, b1l = b1r-sv*0.08, b2l = b2r-sv*0.05
+          const sv = js/nS
+          const b1l = b1r - sv*0.08, b2l = b2r - sv*0.05
+          // ─ ねじれ ─────────────────────────────────────────────
+          // スパン方向(Y軸)を中心に、crown(sv=0)→band(sv=1)へ
+          // β1b と β2b の差分ぶん断面を回転させる（Francis羽根特有のねじれ）
+          const twist = sv * (b1r - b2r) * 0.9
+          const cosT = Math.cos(twist), sinT = Math.sin(twist)
+          // スパン: Y軸方向（クラウン=上, バンド=下）
+          const py = sv * spanM - spanM/2
           for (let ic = 0; ic <= nC; ic++) {
             const x = ic/nC, yc = camberAt(x,b1l,b2l)*cScale, yt = nacaY(x,1.0)*tScale
-            const px = x*CHORD - CHORD/2, pz = sv*spanM - spanM/2
-            upper.push(px, yc+yt, pz); lower.push(px, yc-yt, pz)
+            const cx = x*CHORD - CHORD/2  // ローカル弦方向
+            // Y軸周りにtwist回転: 翼厚方向がZ軸（奥行き）に配置される
+            // upper (負圧面): 翼厚 +yt
+            upper.push(
+               cx * cosT + (yc + yt) * sinT,  // X
+               py,                              // Y (スパン=垂直)
+              -cx * sinT + (yc + yt) * cosT    // Z
+            )
+            // lower (圧力面): 翼厚 -yt
+            lower.push(
+               cx * cosT + (yc - yt) * sinT,
+               py,
+              -cx * sinT + (yc - yt) * cosT
+            )
           }
         }
         const stride=nC+1, nV=(nS+1)*stride, allPos=upper.concat(lower), idx: number[]=[]
@@ -173,10 +193,15 @@ export function FrancisBlade3D({ results }: Props) {
       function updateArrows(b1deg: number, b2deg: number) {
         while (arrowGroup.children.length) arrowGroup.remove(arrowGroup.children[0])
         const b1r=b1deg*Math.PI/180, b2r=b2deg*Math.PI/180, sc=0.32
-        const le=new THREE.Vector3(-CHORD/2,0,0), te=new THREE.Vector3(CHORD/2,0,0)
-        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(Math.cos(b1r),Math.sin(b1r),0),le,sc,0x60a5fa,sc*0.22,sc*0.14))
-        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),le,sc*0.7,0x34d399,sc*0.22,sc*0.14))
-        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(Math.cos(b2r),Math.sin(b2r),0),te,sc,0xc084fc,sc*0.22,sc*0.14))
+        // スパンがY軸になったので矢印はXZ平面内（Y成分を使わずZ成分で角度を表現）
+        const lePos=new THREE.Vector3(-CHORD/2, 0, 0)
+        const tePos=new THREE.Vector3( CHORD/2, 0, 0)
+        // 入口相対速度 w1（前縁、XZ平面内でβ1b方向）
+        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(Math.cos(b1r),0,Math.sin(b1r)),lePos,sc,0x60a5fa,sc*0.22,sc*0.14))
+        // 周速 u1（水平X方向）
+        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(1,0,0),lePos,sc*0.7,0x34d399,sc*0.22,sc*0.14))
+        // 出口相対速度 w2（後縁）
+        arrowGroup.add(new THREE.ArrowHelper(new THREE.Vector3(Math.cos(b2r),0,Math.sin(b2r)),tePos,sc,0xc084fc,sc*0.22,sc*0.14))
       }
 
       // ── 寸法線グループ（デフォルトOFF）──

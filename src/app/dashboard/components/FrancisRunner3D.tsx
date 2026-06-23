@@ -175,68 +175,111 @@ export function FrancisRunner3D({ results }: Props) {
       const shaftGeo = new THREE.CylinderGeometry(D7*0.15, D7*0.15, H2*3, 16)
       const shaftMesh = new THREE.Mesh(shaftGeo, matShaft)
       shaftMesh.position.y = H2*0.8; runner.add(shaftMesh)
+// ── ブレード生成 ──
+const b1r = beta1 * Math.PI / 180, b2r = beta2 * Math.PI / 180
+const nC = 24, nS = 16
 
-      // ── ブレード生成 ──
-      const b1r = beta1*Math.PI/180, b2r = beta2*Math.PI/180
-      const nC = 24, nS = 16
+function makeBezierPts(p0r:number,p0y:number,p1r:number,p1y:number,p2r:number,p2y:number,p3r:number,p3y:number,N:number) {
+  const pts: {x:number;y:number}[] = []
+  for (let i=0;i<=N;i++) {
+    const t=i/N, mt=1-t
+    pts.push({ x:mt*mt*mt*p0r+3*mt*mt*t*p1r+3*mt*t*t*p2r+t*t*t*p3r, y:mt*mt*mt*p0y+3*mt*mt*t*p1y+3*mt*t*t*p2y+t*t*t*p3y })
+  }
+  return pts
+}
 
-      function makeBezierPts(p0r:number,p0y:number,p1r:number,p1y:number,p2r:number,p2y:number,p3r:number,p3y:number,N:number) {
-        const pts: {x:number;y:number}[] = []
-        for (let i=0;i<=N;i++) {
-          const t=i/N,mt=1-t
-          pts.push({ x:mt*mt*mt*p0r+3*mt*mt*t*p1r+3*mt*t*t*p2r+t*t*t*p3r, y:mt*mt*mt*p0y+3*mt*mt*t*p1y+3*mt*t*t*p2y+t*t*t*p3y })
-        }
-        return pts
-      }
-      const r1=D1/2,r5=D5/2,r6=D6/2,r2=D2/2
-      const cpPts = makeBezierPts(r1,0, r1*0.5,H2*0.15, r6+(r1-r6)*0.2,H2*0.85, r6,H2, 48)
-      const bpPts = makeBezierPts(r5,B1, r5*1.02,B1+H2*0.1, r2-(r2-r5)*0.15,B1+H2*0.85, r2,B1+H2*0.85, 48)
-      const cIn=cpPts[0], cOut=cpPts[48], bIn=bpPts[0]
-      const cvr=cOut.x-cIn.x, cvy=cOut.y-cIn.y
-      const cvLen=Math.sqrt(cvr*cvr+cvy*cvy)
-      const ecr=cvr/cvLen, ecy=cvy/cvLen, enr=-ecy, eny=ecr
-      const svr=bIn.x-cIn.x, svy=bIn.y-cIn.y
+const r1=D1/2, r5=D5/2, r6=D6/2, r2=D2/2
 
-      function nacaY2(x:number,t:number) {
-        if (x<=0) x=1e-4
-        return (t/0.2)*(0.2969*Math.sqrt(x)-0.126*x-0.3516*x*x+0.2843*x*x*x-0.1015*x*x*x*x)
-      }
-      function camberAt(x:number,b1:number,b2:number) {
-        const N=30,dx=x/N; let yc=0
-        for (let i=0;i<N;i++) { const a=b1+(b2-b1)*dx*i,bv=b1+(b2-b1)*dx*(i+1); yc+=(Math.sin(a)+Math.sin(bv))/2*dx }
-        return yc
-      }
-      const nacaAt001=0.142
-      const tScale1=t1/(2*nacaAt001), tScale2=t2/(2*nacaAt001)
-      const bladeGeos: import('three').BufferGeometry[] = []
+// クラウン・バンドのメリジオナル曲線
+const cpPts = makeBezierPts(r1, 0,   r1*0.5, H2*0.15,  r6+(r1-r6)*0.2, H2*0.85,  r6, H2,          48)
+const bpPts = makeBezierPts(r5, B1,  r5*1.02,B1+H2*0.1, r2-(r2-r5)*0.15,B1+H2*0.85, r2, B1+H2*0.85, 48)
 
-      for (let bi=0;bi<nBlades;bi++) {
-        const angle=(bi/nBlades)*Math.PI*2
-        const ca=Math.cos(angle),sa=Math.sin(angle),etx=-sa,etz=ca
-        const posUpper:number[]=[],posLower:number[]=[]
-        for (let js=0;js<=nS;js++) {
-          const sv=js/nS,b1l=b1r-sv*0.08,b2l=b2r-sv*0.05,r0=cIn.x+sv*svr,y0=cIn.y+sv*svy
-          for (let ic=0;ic<=nC;ic++) {
-            const xc=ic/nC,yc=camberAt(xc,b1l,b2l)*0
-            const tScale=tScale1+(tScale2-tScale1)*xc,yt=nacaY2(xc,1.0)*tScale
-            const rc=r0+xc*cvLen*ecr+yc*enr,ycp=y0+xc*cvLen*ecy+yc*eny
-            posUpper.push(rc*ca-yt*etx, Math.max(0,ycp-yt*Math.abs(eny)), rc*sa-yt*etz)
-            posLower.push(rc*ca+yt*etx, Math.max(0,ycp+yt*Math.abs(eny)), rc*sa+yt*etz)
-          }
-        }
-        const stride=nC+1,nV=(nS+1)*stride,allPos=posUpper.concat(posLower),idxArr:number[]=[]
-        for (let js=0;js<nS;js++) for (let ic=0;ic<nC;ic++) { const b=js*stride+ic,n=b+stride; idxArr.push(b,n,b+1,n,n+1,b+1) }
-        for (let js=0;js<nS;js++) for (let ic=0;ic<nC;ic++) { const b=nV+js*stride+ic,n=b+stride; idxArr.push(b,b+1,n,n,b+1,n+1) }
-        for (let js=0;js<nS;js++) { const u0=js*stride,u1=(js+1)*stride,l0=nV+js*stride,l1=nV+(js+1)*stride; idxArr.push(u0,l0,u1,l0,l1,u1) }
-        for (let js=0;js<nS;js++) { const u0=js*stride+nC,u1=(js+1)*stride+nC,l0=nV+js*stride+nC,l1=nV+(js+1)*stride+nC; idxArr.push(u0,u1,l0,l0,u1,l1) }
-        for (let ic=0;ic<nC;ic++) idxArr.push(ic,ic+1,nV+ic,nV+ic,ic+1,nV+ic+1)
-        for (let ic=0;ic<nC;ic++) { const u0=nS*stride+ic,u1=nS*stride+ic+1,l0=nV+nS*stride+ic,l1=nV+nS*stride+ic+1; idxArr.push(u0,l0,u1,l0,l1,u1) }
-        const bladeGeo = new THREE.BufferGeometry()
-        bladeGeo.setAttribute('position', new THREE.Float32BufferAttribute(allPos,3))
-        bladeGeo.setIndex(idxArr); bladeGeo.computeVertexNormals()
-        runner.add(new THREE.Mesh(bladeGeo, matBlade))
-        bladeGeos.push(bladeGeo)
-      }
+// 弦長: クラウン入口→出口, バンド入口→出口
+const cIn=cpPts[0], cOut=cpPts[48], bIn=bpPts[0], bOut=bpPts[48]
+const cvLen = Math.sqrt((cOut.x-cIn.x)**2 + (cOut.y-cIn.y)**2)
+const bvLen = Math.sqrt((bOut.x-bIn.x)**2 + (bOut.y-bIn.y)**2)
+
+function nacaY2(x:number, t:number) {
+  if (x<=0) x=1e-4
+  return (t/0.2)*(0.2969*Math.sqrt(x)-0.126*x-0.3516*x*x+0.2843*x*x*x-0.1015*x*x*x*x)
+}
+function camberAt(x:number, b1:number, b2:number) {
+  const N=30, dx=x/N; let yc=0
+  for (let i=0;i<N;i++) { const a=b1+(b2-b1)*dx*i, bv=b1+(b2-b1)*dx*(i+1); yc+=(Math.sin(a)+Math.sin(bv))/2*dx }
+  return yc
+}
+
+let ycMax=0
+for (let i=0;i<=20;i++) { const y=Math.abs(camberAt(i/20,b1r,b2r)); if(y>ycMax) ycMax=y }
+const cScale = ycMax>0 ? cvLen*0.08/ycMax : 0
+const nacaAt001 = 0.142
+const tScale1 = t1/(2*nacaAt001), tScale2 = t2/(2*nacaAt001)
+const bladeGeos: import('three').BufferGeometry[] = []
+
+for (let bi=0; bi<nBlades; bi++) {
+  const angle = (bi/nBlades)*Math.PI*2
+  const ca=Math.cos(angle), sa=Math.sin(angle)
+  const etx=-sa, etz=ca  // 接線方向（タンジェンシャル）
+
+  const posUpper:number[]=[], posLower:number[]=[]
+
+  for (let js=0; js<=nS; js++) {
+    const sv = js/nS  // sv=0: クラウン面, sv=1: バンド面
+
+    // ── スパン方向: クラウン→バンドのメリジオナル線を sv で補間 ──
+    // 弦方向進行パラメータ xc に対応するメリジオナル位置を補間
+    // クラウン: cpPts[0](入口)〜cpPts[48](出口)
+    // バンド:   bpPts[0](入口)〜bpPts[48](出口)
+    const b1l = b1r - sv*0.08, b2l = b2r - sv*0.05
+    const twist = sv * (b1r - b2r) * 0.5
+    const cosT = Math.cos(twist), sinT = Math.sin(twist)
+    const localChord = cvLen*(1-sv) + bvLen*sv
+
+    for (let ic=0; ic<=nC; ic++) {
+      const xc = ic/nC  // 弦方向 0〜1
+
+      // ── メリジオナル位置: 弦方向 xc に対応するクラウン・バンド点を補間 ──
+      const mi = Math.round(xc * 48)  // メリジオナル曲線上のインデックス
+      const cpP = cpPts[mi], bpP = bpPts[mi]
+      const r0 = cpP.x*(1-sv) + bpP.x*sv  // ラジアル座標
+      const y0 = cpP.y*(1-sv) + bpP.y*sv  // 高さ座標
+
+      const yc = camberAt(xc, b1l, b2l) * cScale
+      const tScaleLocal = tScale1 + (tScale2-tScale1)*xc
+      const yt = nacaY2(xc, 1.0) * tScaleLocal
+      const cx = xc*localChord - localChord/2
+
+      const tanU = cx*cosT + (yc+yt)*sinT
+      const tanL = cx*cosT + (yc-yt)*sinT
+      const radU = -cx*sinT + (yc+yt)*cosT
+      const radL = -cx*sinT + (yc-yt)*cosT
+
+      const xU=r0*ca + tanU*etx + radU*ca, zU=r0*sa + tanU*etz + radU*sa
+      const rU=Math.sqrt(xU*xU+zU*zU), sfU=rU>r5?r5/rU:1
+      posUpper.push(xU*sfU, y0, zU*sfU)
+
+      const xL=r0*ca + tanL*etx + radL*ca, zL=r0*sa + tanL*etz + radL*sa
+      const rL=Math.sqrt(xL*xL+zL*zL), sfL=rL>r5?r5/rL:1
+      posLower.push(xL*sfL, y0, zL*sfL)
+    }
+  }
+
+  const stride=nC+1, nV=(nS+1)*stride, allPos=posUpper.concat(posLower), idxArr:number[]=[]
+  for (let js=0;js<nS;js++) for (let ic=0;ic<nC;ic++) { const b=js*stride+ic,n=b+stride; idxArr.push(b,n,b+1,n,n+1,b+1) }
+  for (let js=0;js<nS;js++) for (let ic=0;ic<nC;ic++) { const b=nV+js*stride+ic,n=b+stride; idxArr.push(b,b+1,n,n,b+1,n+1) }
+  for (let js=0;js<nS;js++) { const u0=js*stride,u1=(js+1)*stride,l0=nV+js*stride,l1=nV+(js+1)*stride; idxArr.push(u0,l0,u1,l0,l1,u1) }
+  for (let js=0;js<nS;js++) { const u0=js*stride+nC,u1=(js+1)*stride+nC,l0=nV+js*stride+nC,l1=nV+(js+1)*stride+nC; idxArr.push(u0,u1,l0,l0,u1,l1) }
+  for (let ic=0;ic<nC;ic++) idxArr.push(ic,ic+1,nV+ic,nV+ic,ic+1,nV+ic+1)
+  for (let ic=0;ic<nC;ic++) { const u0=nS*stride+ic,u1=nS*stride+ic+1,l0=nV+nS*stride+ic,l1=nV+nS*stride+ic+1; idxArr.push(u0,l0,u1,l0,l1,u1) }
+
+  const bladeGeo = new THREE.BufferGeometry()
+  bladeGeo.setAttribute('position', new THREE.Float32BufferAttribute(allPos, 3))
+  bladeGeo.setIndex(idxArr); bladeGeo.computeVertexNormals()
+  runner.add(new THREE.Mesh(bladeGeo, matBlade))
+  bladeGeos.push(bladeGeo)
+}
+geoStoreRef.current = [crownGeo, bandGeo, bossGeo, ...bladeGeos]
+
       geoStoreRef.current = [crownGeo, bandGeo, bossGeo, ...bladeGeos]
 
       // ── 寸法線（3D線 + 2Dラベル） ──
