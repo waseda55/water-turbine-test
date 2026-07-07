@@ -445,7 +445,7 @@ function calcFrancisDetailedParams(
 
   // ── ステーベーン流入角（16断面） ──
   const th0 = 21.03
-  const stayVaneAngles = Array.from({ length: 16 }, (_, i) => {
+  const stayVaneAngles = Array.from({ length: 15 }, (_, i) => {
     const no    = i + 1
     const theta = no * 360 / 16
     const Qn    = Q * (16 - no) / 16
