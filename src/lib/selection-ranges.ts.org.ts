@@ -48,7 +48,6 @@ export async function fetchNsRanges(): Promise<NsRange[]> {
     .select(`
       id, turbine_type_id,
       ns_min, ns_max, overlap_note,
-      nsp_target_min, nsp_target_max, nsp_target_step,
       source, note, version,
       turbine_types ( id, name, icon, color, sort_order, is_active )
     `)
@@ -72,9 +71,6 @@ export async function fetchNsRanges(): Promise<NsRange[]> {
     nsMin:       Number(r.ns_min),
     nsMax:       Number(r.ns_max),
     overlapNote: r.overlap_note,
-    nspTargetMin:  r.nsp_target_min  !== null && r.nsp_target_min  !== undefined ? Number(r.nsp_target_min)  : null,
-    nspTargetMax:  r.nsp_target_max  !== null && r.nsp_target_max  !== undefined ? Number(r.nsp_target_max)  : null,
-    nspTargetStep: r.nsp_target_step !== null && r.nsp_target_step !== undefined ? Number(r.nsp_target_step) : null,
     source:      r.source,
     note:        r.note,
     version:     r.version,

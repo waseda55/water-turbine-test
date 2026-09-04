@@ -52,29 +52,12 @@ export interface VelocityTriangle {
   wu: number
 }
 
-// 既製品候補（標準Nsp区分）1件分
-export interface NspAlternative {
-  turbineType: 'フランシス水車' | 'カプラン水車'
-  targetNsp: number       // 標準区分の目標Nsp（例: 190, 160）
-  n: number
-  poles: number
-  Nsp: number              // その区分・極数での実到達Nsp
-  predictedEff: number
-  diff: number              // |Nsp - targetNsp|
-  withinTolerance: boolean
-  targetFlowRate: number | null  // 標準区分のNspちょうどで運転すると仮定した場合の理論流量Q [m3/s]（H・Nはこの現場の値で固定）
-}
-
 export interface TurbineResults {
   turbineType: TurbineType
   turbinePower: number      // 水車出力 Pw [kW]
   generatorPower: number    // 発電機出力 Pe [kW]
   specificSpeed: number     // 比速度 Ns
   predictedEff: number | null  // 比速度多項式による推定効率 η_pred [0-1]（フランシス・軸流のみ）
-  nspAlternatives: NspAlternative[] | null  // 既製品候補（標準Nsp区分の上位候補、フランシス・軸流のみ）
-  convergedNsp: number | null  // 選定段階でのNsp収束計算値（フランシス・軸流のみ）。
-                                 // specificSpeedとは異なり、turbineEff入力によるキャップを受けない生の収束値。
-                                 // 既製品候補（nspAlternatives）の targetNsp/diff と同じ基準で比較する際はこちらを使う。
   ratedRpm: number          // 定格回転速度 [rpm]
   poles: number             // 極数
   runawaySpeed: number      // 暴走速度 [rpm]
@@ -258,9 +241,6 @@ export interface NsRange {
   source: string | null
   note: string | null
   version: string
-  nspTargetMin?: number | null
-  nspTargetMax?: number | null
-  nspTargetStep?: number | null
 }
 
 // ─── Supabase DB 型（snake_case）への追記 ──────────────────

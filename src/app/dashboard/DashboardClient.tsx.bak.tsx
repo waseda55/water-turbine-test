@@ -2,8 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { calculate, getEfficiencyCurve, getHillChartData, calcFrancisEfficiencyCurve, evaluateRunnerDiameterCandidates, N11_FRANCIS } from '@/lib/turbine-calc'
-import type { RunnerDiameterCandidate } from '@/lib/turbine-calc'
+import { calculate, getEfficiencyCurve, getHillChartData, calcFrancisEfficiencyCurve } from '@/lib/turbine-calc'
 import { exportJSON, exportCSV, exportExcel, exportDXF, importJSON } from '@/lib/export'
 import type { TurbineInputs, TurbineResults, TurbineType, HQRange, NsRange } from '@/types'
 import { useRouter } from 'next/navigation'
@@ -433,16 +432,11 @@ export default function DashboardClient(_props: Props) {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
-  const [showNspCompare, setShowNspCompare] = useState(false)
-  const [diameterEvalKey, setDiameterEvalKey] = useState<string | null>(null)
-  const [diameterEvalResult, setDiameterEvalResult] = useState<RunnerDiameterCandidate[] | null>(null)
-  const [diameterEvalLoading, setDiameterEvalLoading] = useState(false)
   const [exportName, setExportName] = useState('')
   const [exportLoading, setExportLoading] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [sidebarTab, setSidebarTab] = useState<'history' | 'projects'>('history')
-  const [rightPaneOpen, setRightPaneOpen] = useState(false)
   const [mainTab, setMainTab] = useState<'result' | 'hq' | 'ns' | 'schematic' | 'velocity' | 'francis_detail' | 'francis_drawings' | 'hill_chart'>('result')
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [flowUnit, setFlowUnit] = useState<FlowUnit>('m3/s')
@@ -953,183 +947,39 @@ export default function DashboardClient(_props: Props) {
 
               {results.nspAlternatives && results.nspAlternatives.length > 0 && (
                 <div className="panel" style={{ padding: 14, marginBottom: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div className="sec-hd" style={{ marginBottom: 0 }}>🏭 既製品候補（標準Nsp区分）</div>
-                    <button
-                      onClick={() => setShowNspCompare(v => !v)}
-                      style={{
-                        fontSize: 10, fontWeight: 700, padding: '4px 10px',
-                        border: '1px solid var(--border)', background: showNspCompare ? 'var(--accent)' : 'var(--surface2)',
-                        color: showNspCompare ? '#fff' : 'var(--text)', cursor: 'pointer',
-                      }}>
-                      {showNspCompare ? '表を閉じる' : `比較表を見る（上位${results.nspAlternatives.length}件）`}
-                    </button>
+                  <div className="sec-hd">🏭 既製品候補（標準Nsp区分）</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+                    特注設計の最適点 Ns={(results.convergedNsp ?? results.specificSpeed).toFixed(1)} に対し、既製ラインナップの標準区分（Hs）で近いものをスコア順に表示しています。
+                    許容差（±10）以内なら追加設計負担が小さく、既製品での対応が現実的です。
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', margin: '8px 0 10px', lineHeight: 1.6 }}>
-                    特注設計の最適点 Ns={(results.convergedNsp ?? results.specificSpeed).toFixed(1)}（流量 Q={toDisplayFlow(inputs.flowRate, flowUnit).toFixed(fu.dec)} {fu.label}）に対し、既製ラインナップの標準区分（Hs）で近いものをスコア順に表示しています。
-                    許容差（±10）以内なら追加設計負担が小さく、既製品での対応が現実的です。理論流量は、その標準区分ちょうどのNspで運転すると仮定した場合に必要な流量です。
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${results.nspAlternatives.length}, 1fr)`, gap: 8 }}>
+                    {results.nspAlternatives.map((alt, i) => (
+                      <div key={`${alt.turbineType}-${alt.targetNsp}`}
+                        style={{
+                          border: `1px solid ${alt.withinTolerance ? 'var(--ok, #34d399)' : 'var(--border)'}`,
+                          background: alt.withinTolerance ? 'color-mix(in srgb, #34d399 8%, transparent)' : 'var(--surface2)',
+                          padding: '10px 12px', position: 'relative',
+                        }}>
+                        <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 9, fontWeight: 700, color: 'var(--muted)' }}>
+                          #{i + 1}
+                        </div>
+                        <div style={{ fontSize: 9, color: 'var(--muted)', letterSpacing: '0.05em', marginBottom: 2 }}>
+                          標準区分 Hs
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: alt.withinTolerance ? '#34d399' : 'var(--accent)' }}>
+                          {alt.targetNsp}
+                        </div>
+                        <div style={{ fontSize: 10, marginTop: 6, lineHeight: 1.7 }}>
+                          <div>到達Nsp：<b>{alt.Nsp.toFixed(1)}</b>（差 {alt.diff.toFixed(1)}）</div>
+                          <div>回転速度：<b>{Math.round(alt.n)}</b> rpm　極数：<b>{alt.poles}</b>P</div>
+                          <div>推定効率：<b>{(alt.predictedEff * 100).toFixed(2)}</b> %</div>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 9, fontWeight: 700, color: alt.withinTolerance ? '#34d399' : 'var(--warn)' }}>
+                          {alt.withinTolerance ? '✓ 許容差内' : '△ 許容差外（要検討）'}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-
-                  {!showNspCompare && (
-                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(results.nspAlternatives.length, 2)}, 1fr)`, gap: 8 }}>
-                      {results.nspAlternatives.slice(0, 2).map((alt, i) => {
-                        const qDiffPct = alt.targetFlowRate !== null
-                          ? ((alt.targetFlowRate - inputs.flowRate) / inputs.flowRate) * 100
-                          : null
-                        return (
-                          <div key={`${alt.turbineType}-${alt.targetNsp}`}
-                            style={{
-                              border: `1px solid ${alt.withinTolerance ? 'var(--ok, #34d399)' : 'var(--border)'}`,
-                              background: alt.withinTolerance ? 'color-mix(in srgb, #34d399 8%, transparent)' : 'var(--surface2)',
-                              padding: '10px 12px', position: 'relative',
-                            }}>
-                            <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 9, fontWeight: 700, color: 'var(--muted)' }}>
-                              #{i + 1}
-                            </div>
-                            <div style={{ fontSize: 9, color: 'var(--muted)', letterSpacing: '0.05em', marginBottom: 2 }}>
-                              標準区分 Hs
-                            </div>
-                            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: alt.withinTolerance ? '#34d399' : 'var(--accent)' }}>
-                              {alt.targetNsp}
-                            </div>
-                            <div style={{ fontSize: 10, marginTop: 6, lineHeight: 1.7 }}>
-                              <div>上記実測値との差：<b>{alt.diff.toFixed(1)}</b></div>
-                              <div>回転速度：<b>{Math.round(alt.n)}</b> rpm　極数：<b>{alt.poles}</b>P</div>
-                              <div>推定効率：<b>{(alt.predictedEff * 100).toFixed(2)}</b> %</div>
-                              <div>
-                                理論流量：<b>{alt.targetFlowRate !== null ? toDisplayFlow(alt.targetFlowRate, flowUnit).toFixed(fu.dec) : '—'}</b> {fu.label}
-                                {qDiffPct !== null && (
-                                  <span style={{ color: Math.abs(qDiffPct) > 10 ? 'var(--warn)' : 'var(--muted)' }}>
-                                    　（現場流量比 {qDiffPct >= 0 ? '+' : ''}{qDiffPct.toFixed(1)}%）
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div style={{ marginTop: 6, fontSize: 9, fontWeight: 700, color: alt.withinTolerance ? '#34d399' : 'var(--warn)' }}>
-                              {alt.withinTolerance ? '✓ 許容差内' : '△ 許容差外（要検討）'}
-                            </div>
-
-                            {alt.turbineType === 'フランシス水車' && (() => {
-                              const key = `${alt.turbineType}-${alt.targetNsp}`
-                              const isOpen = diameterEvalKey === key
-                              return (
-                                <div style={{ marginTop: 8 }}>
-                                  <button
-                                    onClick={() => {
-                                      if (isOpen) { setDiameterEvalKey(null); return }
-                                      setDiameterEvalLoading(true)
-                                      setDiameterEvalKey(key)
-                                      setTimeout(() => {
-                                        const d1Theoretical = Math.sqrt(inputs.head) * N11_FRANCIS / alt.n
-                                        const candidates = evaluateRunnerDiameterCandidates(
-                                          inputs.head, inputs.flowRate, alt.n, alt.targetNsp, d1Theoretical,
-                                        )
-                                        setDiameterEvalResult(candidates)
-                                        setDiameterEvalLoading(false)
-                                      }, 0)
-                                    }}
-                                    style={{
-                                      fontSize: 9, fontWeight: 700, padding: '4px 8px', width: '100%',
-                                      border: '1px solid var(--border)', background: 'var(--surface2)',
-                                      color: 'var(--text)', cursor: 'pointer',
-                                    }}>
-                                    {isOpen ? '径ごとの性能を閉じる' : '📏 径ごとの性能を見る（±10%）'}
-                                  </button>
-
-                                  {isOpen && diameterEvalLoading && (
-                                    <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 6 }}>計算中…</div>
-                                  )}
-
-                                  {isOpen && !diameterEvalLoading && diameterEvalResult && (
-                                    <div style={{ marginTop: 6, overflowX: 'auto' }}>
-                                      <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4, lineHeight: 1.5 }}>
-                                        理論径 D1={ (Math.sqrt(inputs.head) * N11_FRANCIS / alt.n).toFixed(3) }m を中心に±10%の径候補で、現場のH・Q・Nでの効率を1次元損失モデルで評価（効率が高い順）。
-                                      </div>
-                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9 }}>
-                                        <thead>
-                                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                            {['径D1', '自身の設計H/Q', '現場での効率', '現場での出力', '判定'].map(h => (
-                                              <th key={h} style={{ textAlign: 'left', padding: '4px 6px', color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {diameterEvalResult.slice(0, 8).map((c, ci) => (
-                                            <tr key={ci} style={{ borderBottom: '1px solid var(--border)', background: ci === 0 ? 'color-mix(in srgb, #34d399 8%, transparent)' : 'transparent' }}>
-                                              <td style={{ padding: '4px 6px', fontFamily: "'JetBrains Mono', monospace", fontWeight: ci === 0 ? 700 : 400 }}>{c.D1.toFixed(3)}m</td>
-                                              <td style={{ padding: '4px 6px' }}>{c.ownRatedHead.toFixed(1)}m / {toDisplayFlow(c.ownRatedFlow, flowUnit).toFixed(fu.dec)}{fu.label}</td>
-                                              <td style={{ padding: '4px 6px', fontWeight: ci === 0 ? 700 : 400 }}>{c.siteEta !== null ? (c.siteEta * 100).toFixed(2) + '%' : '—'}</td>
-                                              <td style={{ padding: '4px 6px' }}>{c.sitePower !== null ? c.sitePower.toFixed(0) + 'kW' : '—'}</td>
-                                              <td style={{ padding: '4px 6px', color: c.outOfRange ? 'var(--warn)' : 'var(--muted)' }}>
-                                                {ci === 0 ? '★最適' : c.outOfRange ? '範囲外挿' : ''}
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {showNspCompare && (
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                            {['順位', '形式', 'Hs / Ns', '差', '流量Q', '流量差', '回転速度', '極数', '推定効率', '判定'].map(h => (
-                              <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface2)' }}>
-                            <td style={{ padding: '6px 8px', fontWeight: 700 }}>実測</td>
-                            <td style={{ padding: '6px 8px' }}>{results.turbineType}</td>
-                            <td style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace" }}>{(results.convergedNsp ?? results.specificSpeed).toFixed(1)}</td>
-                            <td style={{ padding: '6px 8px' }}>—</td>
-                            <td style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace" }}>{toDisplayFlow(inputs.flowRate, flowUnit).toFixed(fu.dec)} {fu.label}</td>
-                            <td style={{ padding: '6px 8px' }}>—</td>
-                            <td style={{ padding: '6px 8px' }}>{Math.round(results.ratedRpm)} rpm</td>
-                            <td style={{ padding: '6px 8px' }}>{results.poles}P</td>
-                            <td style={{ padding: '6px 8px' }}>{results.predictedEff !== null ? (results.predictedEff * 100).toFixed(2) + '%' : '—'}</td>
-                            <td style={{ padding: '6px 8px', fontWeight: 700 }}>基準</td>
-                          </tr>
-                          {results.nspAlternatives.map((alt, i) => {
-                            const qDiffPct = alt.targetFlowRate !== null
-                              ? ((alt.targetFlowRate - inputs.flowRate) / inputs.flowRate) * 100
-                              : null
-                            return (
-                              <tr key={`${alt.turbineType}-${alt.targetNsp}`} style={{ borderBottom: '1px solid var(--border)' }}>
-                                <td style={{ padding: '6px 8px', fontWeight: 700 }}>#{i + 1}</td>
-                                <td style={{ padding: '6px 8px' }}>{alt.turbineType}</td>
-                                <td style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace", color: alt.withinTolerance ? '#34d399' : 'var(--accent)', fontWeight: 700 }}>{alt.targetNsp}</td>
-                                <td style={{ padding: '6px 8px' }}>{alt.diff.toFixed(1)}</td>
-                                <td style={{ padding: '6px 8px', fontFamily: "'JetBrains Mono', monospace" }}>
-                                  {alt.targetFlowRate !== null ? toDisplayFlow(alt.targetFlowRate, flowUnit).toFixed(fu.dec) : '—'} {fu.label}
-                                </td>
-                                <td style={{ padding: '6px 8px', color: qDiffPct !== null && Math.abs(qDiffPct) > 10 ? 'var(--warn)' : 'var(--muted)' }}>
-                                  {qDiffPct !== null ? `${qDiffPct >= 0 ? '+' : ''}${qDiffPct.toFixed(1)}%` : '—'}
-                                </td>
-                                <td style={{ padding: '6px 8px' }}>{Math.round(alt.n)} rpm</td>
-                                <td style={{ padding: '6px 8px' }}>{alt.poles}P</td>
-                                <td style={{ padding: '6px 8px' }}>{(alt.predictedEff * 100).toFixed(2)}%</td>
-                                <td style={{ padding: '6px 8px', fontWeight: 700, color: alt.withinTolerance ? '#34d399' : 'var(--warn)' }}>
-                                  {alt.withinTolerance ? '✓ 許容差内' : '△ 許容差外'}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1775,24 +1625,6 @@ export default function DashboardClient(_props: Props) {
         </main>
 
         {/* ── RIGHT: Sidebar ── */}
-        {!rightPaneOpen && (
-          <button
-            onClick={() => setRightPaneOpen(true)}
-            title="履歴／プロジェクトを開く"
-            style={{
-              width: 28, flexShrink: 0, background: 'var(--surface)', borderLeft: '1px solid var(--border)',
-              cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center',
-              justifyContent: 'flex-start', paddingTop: 14, gap: 8,
-            }}>
-            <span style={{ fontSize: 13 }}>◀</span>
-            <span style={{
-              writingMode: 'vertical-rl', fontSize: 10, color: 'var(--muted)', letterSpacing: '0.1em', marginTop: 4,
-            }}>
-              履歴／プロジェクト
-            </span>
-          </button>
-        )}
-        {rightPaneOpen && (
         <aside style={{ width: 220, flexShrink: 0, background: 'var(--surface)', borderLeft: '1px solid var(--border)', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <div className="flex" style={{ borderBottom: '1px solid var(--border)' }}>
             {(['history', 'projects'] as const).map(t => (
@@ -1800,10 +1632,6 @@ export default function DashboardClient(_props: Props) {
                 {t === 'history' ? '履歴' : 'プロジェクト'}
               </button>
             ))}
-            <button onClick={() => setRightPaneOpen(false)} title="閉じる"
-              style={{ fontSize: 12, padding: '0 10px', color: 'var(--muted)', cursor: 'pointer', flexShrink: 0 }}>
-              ▶
-            </button>
           </div>
           {sidebarTab === 'history' && (
             <div style={{ flex: 1, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1832,7 +1660,6 @@ export default function DashboardClient(_props: Props) {
             </div>
           )}
         </aside>
-        )}
       </div>
 
       {/* ── Save Modal ── */}

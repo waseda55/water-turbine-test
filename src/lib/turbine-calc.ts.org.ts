@@ -1,4 +1,4 @@
-import type { TurbineInputs, TurbineResults, TurbineType, VelocityTriangle, NsRange, NspAlternative } from '@/types'
+import type { TurbineInputs, TurbineResults, TurbineType, VelocityTriangle, NsRange } from '@/types'
 
 const RHO = 1000
 const G   = 9.81
@@ -77,57 +77,15 @@ interface NspCandidate {
   P: number
   eta: number
   diff: number
-  targetNsp: number
-}
-
-// Nsp目標値レンジ生成（min, max, stepの等間隔配列）
-function generateNspTargets(min: number, max: number, step: number): number[] {
-  const targets: number[] = []
-  for (let v = min; v <= max + 1e-6; v += step) {
-    targets.push(Math.round(v * 100) / 100)
-  }
-  return targets
-}
-
-// 既製品候補として提示する件数（上位N件）。カード表示は上位2件のみ使うが、
-// 比較表では最大件数まで使えるよう多めに保持しておく。
-const DEFAULT_NSP_TOP_N = 5
-
-// 標準区分のNspちょうどで運転すると仮定した場合の理論流量Qを求める。
-// H・N（この現場・この回転数）は固定し、「この標準区分の設計点で運転するには
-// 実際どれだけの流量が必要か」を逆算する。効率は収束計算せず、targetNsp地点での
-// 予測効率をそのまま自己無矛盾な値として使う（targetNspを所与としているため）。
-function nspTargetFlowRate(
-  head: number, N: number, targetNsp: number,
-  predictFn: (nsp: number) => number,
-): number | null {
-  const eta = predictFn(targetNsp)
-  if (eta <= 0) return null
-  const P = Math.pow(targetNsp * Math.pow(head, 1.25) / N, 2)  // kW
-  return (P * 1000) / (eta * RHO * G * head)  // m3/s
 }
 
 function selectByNspConvergence(
   head: number, flowRate: number, freq: 50 | 60,
   enableFrancis: boolean, enableAxial: boolean,
-  nsRanges?: NsRange[],
-): { turbineType: 'フランシス水車' | 'カプラン水車'; n: number; poles: number; Nsp: number; predictedEff: number; alternatives: NspAlternative[] } | null {
+): { turbineType: 'フランシス水車' | 'カプラン水車'; n: number; poles: number; Nsp: number; predictedEff: number } | null {
   const TOLERANCE = 10.0
-
-  // DBの ns_ranges.nsp_target_min/max/step が設定されていればそれを使用。
-  // 未設定（NULL）の場合は従来の固定配列にフォールバック。
-  const francisRange = nsRanges?.find(r => r.turbineType.name === 'フランシス水車')
-  const targetsFrancis =
-    francisRange?.nspTargetMin != null && francisRange?.nspTargetMax != null && francisRange?.nspTargetStep != null
-      ? generateNspTargets(francisRange.nspTargetMin, francisRange.nspTargetMax, francisRange.nspTargetStep)
-      : [70, 100, 130, 160, 190, 220, 250]
-
-  const axialRange = nsRanges?.find(r => r.turbineType.name === 'カプラン水車')
-  const targetsAxial =
-    axialRange?.nspTargetMin != null && axialRange?.nspTargetMax != null && axialRange?.nspTargetStep != null
-      ? generateNspTargets(axialRange.nspTargetMin, axialRange.nspTargetMax, axialRange.nspTargetStep)
-      : [300, 500, 900]
-
+  const targetsFrancis = [70, 100, 130, 160, 190, 220, 250]
+  const targetsAxial   = [300, 500, 900]
   const candidates: NspCandidate[] = []
 
   for (let p = MIN_POLE; p <= MAX_POLE; p += 2) {
@@ -142,7 +100,7 @@ function selectByNspConvergence(
         const HmaxOk = Nsp <= 40 || head <= (23000 / (Nsp - 40) - 30)
         if (HmaxOk) {
           for (const t of targetsFrancis) {
-            candidates.push({ turbineType: 'フランシス水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t), targetNsp: t })
+            candidates.push({ turbineType: 'フランシス水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t) })
           }
         }
       }
@@ -156,7 +114,7 @@ function selectByNspConvergence(
         const HmaxOk = Nsp <= 35 || head <= (20000 / (Nsp - 35) - 17)
         if (HmaxOk) {
           for (const t of targetsAxial) {
-            candidates.push({ turbineType: 'カプラン水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t), targetNsp: t })
+            candidates.push({ turbineType: 'カプラン水車', n: N, poles: p, Nsp, P, eta, diff: Math.abs(Nsp - t) })
           }
         }
       }
@@ -165,49 +123,12 @@ function selectByNspConvergence(
 
   if (candidates.length === 0) return null
 
-  // 区分（turbineType + targetNsp）ごとに最良候補（diff最小、同点ならeta最大）を代表とする
-  const byClass = new Map<string, NspCandidate>()
-  for (const c of candidates) {
-    const key = `${c.turbineType}_${c.targetNsp}`
-    const cur = byClass.get(key)
-    if (!cur || c.diff < cur.diff || (c.diff === cur.diff && c.eta > cur.eta)) {
-      byClass.set(key, c)
-    }
-  }
-  const classCandidates = Array.from(byClass.values())
+  const withinTol = candidates.filter(c => c.diff <= TOLERANCE)
+  const best = withinTol.length > 0
+    ? withinTol.reduce((a, b) => a.eta >= b.eta ? a : b)
+    : candidates.reduce((a, b) => a.diff < b.diff || (a.diff === b.diff && a.eta >= b.eta) ? a : b)
 
-  // ランキング：許容差内を優先（内部ではeta降順）、許容差外はdiff昇順
-  const rank = (c: NspCandidate) => {
-    const ok = c.diff <= TOLERANCE
-    return { ok, c }
-  }
-  const ranked = classCandidates
-    .map(rank)
-    .sort((a, b) => {
-      if (a.ok !== b.ok) return a.ok ? -1 : 1
-      if (a.ok && b.ok) return b.c.eta - a.c.eta
-      return a.c.diff - b.c.diff
-    })
-    .map(r => r.c)
-
-  const best = ranked[0]
-
-  const alternatives: NspAlternative[] = ranked.slice(0, DEFAULT_NSP_TOP_N).map(c => ({
-    turbineType: c.turbineType,
-    targetNsp:   c.targetNsp,
-    n:           c.n,
-    poles:       c.poles,
-    Nsp:         c.Nsp,
-    predictedEff: c.eta,
-    diff:        c.diff,
-    withinTolerance: c.diff <= TOLERANCE,
-    targetFlowRate: nspTargetFlowRate(
-      head, c.n, c.targetNsp,
-      c.turbineType === 'フランシス水車' ? predictEfficiencyFrancis : predictEfficiencyAxial,
-    ),
-  }))
-
-  return { turbineType: best.turbineType, n: best.n, poles: best.poles, Nsp: best.Nsp, predictedEff: best.eta, alternatives }
+  return { turbineType: best.turbineType, n: best.n, poles: best.poles, Nsp: best.Nsp, predictedEff: best.eta }
 }
 
 // 旧 selectRatedSpeed: フォールバック用（Pelton/Crossflow/Tubular向け）
@@ -312,7 +233,7 @@ function calcTubularDimensions(ns: number, flowRate: number, runnerDiameter: num
 function autoSelectTypeWithNsp(
   head: number, flowRate: number, specificSpeed: number,
   freq: 50 | 60, nsRanges?: NsRange[],
-): { turbineType: TurbineType; overrideRpm?: number; overridePoles?: number; predictedEff?: number; nspAlternatives?: NspAlternative[]; convergedNsp?: number } {
+): { turbineType: TurbineType; overrideRpm?: number; overridePoles?: number; predictedEff?: number } {
   const isActive = (name: TurbineType) =>
     nsRanges === undefined ||
     nsRanges.some(r => r.turbineType.name === name && r.turbineType.isActive)
@@ -333,15 +254,13 @@ function autoSelectTypeWithNsp(
   const enableFrancis = isActive('フランシス水車')
   const enableAxial   = isActive('カプラン水車')
   if (enableFrancis || enableAxial) {
-    const nspResult = selectByNspConvergence(head, flowRate, freq, enableFrancis, enableAxial, nsRanges)
+    const nspResult = selectByNspConvergence(head, flowRate, freq, enableFrancis, enableAxial)
     if (nspResult) {
       return {
         turbineType: nspResult.turbineType,
         overrideRpm: nspResult.n,
         overridePoles: nspResult.poles,
         predictedEff: nspResult.predictedEff,
-        nspAlternatives: nspResult.alternatives,
-        convergedNsp: nspResult.Nsp,
       }
     }
   }
@@ -426,7 +345,7 @@ function calcCrossflowVelocityTriangles(
 }
 
 // ── フランシス詳細設計パラメータ（Pythonロジック移植） ──────────
-export const N11_FRANCIS = 62   // 単位速度
+const N11_FRANCIS = 62   // 単位速度
 
 function calcStayVaneAngle(Ds1: number, Bs1: number, th0: number, theta: number, Dcn: number): number {
   const rs1  = Ds1 / 2
@@ -669,8 +588,6 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   let poles: number
   let predictedEff: number | null = null
   let runawayCoeff: number
-  let nspAlternatives: NspAlternative[] | null = null
-  let convergedNsp: number | null = null
 
   if (forcedType) {
     // ── 手動指定形式 ──
@@ -684,14 +601,11 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
         head, flowRate, frequency,
         forcedType === 'フランシス水車',
         forcedType === 'カプラン水車',
-        nsRanges,
       )
       if (nspRes) {
         ratedRpm    = nspRes.n
         poles       = nspRes.poles
         predictedEff = nspRes.predictedEff
-        nspAlternatives = nspRes.alternatives
-        convergedNsp = nspRes.Nsp
       } else {
         // フォールバック：従来方式
         const turbinePowerEst = etaT * RHO * G * flowRate * head / 1000
@@ -719,27 +633,19 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
       ratedRpm     = selected.overrideRpm
       poles        = selected.overridePoles
       predictedEff = selected.predictedEff ?? null
-      nspAlternatives = selected.nspAlternatives ?? null
-      convergedNsp = selected.convergedNsp ?? null
     } else {
       ratedRpm = fallbackRpm.n; poles = fallbackRpm.poles
     }
   }
 
   // ── 出力・比速度 ──────────────────────────────────────────────
-  // 形状決定用（比速度・ランナ径・翼角度など）：収束計算の推定効率をそのまま使う。
-  // 入力欄の水車効率でキャップすると、比速度が「その比速度に対してモデルが予測する効率」と
-  // 整合しなくなり、ランナ形状全体が自己矛盾を起こすため、ここではキャップしない。
-  const effForGeometry = predictedEff !== null ? predictedEff : etaT
-  const specificSpeed  = convergedNsp ?? (ratedRpm * Math.sqrt(RHO * G * flowRate * head * effForGeometry / 1000) / Math.pow(head, 1.25))
-
-  // 出力・発電機出力・年間発電量（経済性）：入力欄の水車効率を上限として使用（保守的な申告値）。
-  // 形状には影響させない。
-  const effForOutput = predictedEff !== null
-    ? Math.min(predictedEff, etaT)
+  // 推定効率がある場合はそちらを使い、turbineEff入力は上限として使用
+  const effForCalc = predictedEff !== null
+    ? Math.min(predictedEff, etaT)   // 推定効率が入力上限を超えない
     : etaT
-  const turbinePower   = (RHO * G * flowRate * head * effForOutput) / 1000
+  const turbinePower   = (RHO * G * flowRate * head * effForCalc) / 1000
   const generatorPower = turbinePower * etaG
+  const specificSpeed  = ratedRpm * Math.sqrt(turbinePower) / Math.pow(head, 1.25)
 
   const runawaySpeed = Math.round(ratedRpm * runawayCoeff)
   const atmPressure  = 101.325 * Math.exp(-altitude / 8500)
@@ -786,7 +692,7 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   // ── 形式別専用寸法 ──
   const peltonDim      = turbineType === 'ペルトン水車'     ? calcPeltonDimensions(specificSpeed, head, flowRate, runnerDiameter)   : null
   const francisDim     = turbineType === 'フランシス水車'   ? calcFrancisDimensions(specificSpeed, flowRate, runnerDiameter)        : null
-  const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, effForGeometry, ratedRpm, specificSpeed) : null
+  const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, effForCalc, ratedRpm, specificSpeed) : null
   const kaplanDim      = turbineType === 'カプラン水車'     ? calcKaplanDimensions(specificSpeed, flowRate, runnerDiameter)         : null
   const crossflowDim   = turbineType === 'クロスフロー水車' ? calcCrossflowDimensions(head, flowRate, runnerDiameter)              : null
   const tubularDim     = turbineType === 'チューブラ水車'   ? calcTubularDimensions(specificSpeed, flowRate, runnerDiameter)       : null
@@ -861,8 +767,6 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
   return {
     turbineType, turbinePower, generatorPower, specificSpeed,
     predictedEff,
-    nspAlternatives,
-    convergedNsp,
     ratedRpm, poles, runawaySpeed, cavitationCoef, hsMax,
     atmPressure, runawayCoeff,
     dimensions: {
@@ -1183,78 +1087,7 @@ export function calcFrancisEfficiencyCurve(
   return results.sort((a, b) => a.Q - b.Q)
 }
 
-// ── ランナ径候補の評価（既製品サイズ選定用） ──────────────────────────
-// Hs（比速度）を固定した状態で、理論径D1_theoreticalの周辺の離散的な候補径ごとに、
-// この現場の実際の運転点（H・Q・N固定）での効率・出力を1次元損失モデルで評価する。
-//
-// 考え方：候補径D1_iは「同じNsp区分（＝同じ翼形状・角度）だが、別のH・Qを設計点として
-// 作られた既製品」とみなす。まずD1_iに対応する「その径自身のBEP（設計点）」となる
-// 落差・流量（ownRatedHead / ownRatedFlow）を、D1=√H×N11/Nの関係から逆算し、
-// その設計点の詳細形状（角度など）を作る。そのうえで、この現場の実際のH・N・Q
-// （＝BEPからズレた運転点）における効率を、calcFrancisEfficiencyCurveで評価する。
-export interface RunnerDiameterCandidate {
-  D1: number                // 候補ランナ径 [m]
-  ownRatedHead: number      // この径自身がHs=targetNspちょうどになる設計落差 [m]（現場Hとは別）
-  ownRatedFlow: number      // 同上の設計流量 [m3/s]
-  siteEta: number | null    // 現場の実際のH・Q・Nで運転した場合の推定効率
-  sitePower: number | null  // 同上の出力 [kW]
-  outOfRange: boolean       // 現場流量が、この径のガイドベーン開度レンジ外だった場合true（外挿）
-}
-
-function interpEffPoint(points: EffPoint1D[], qTarget: number): { eta: number; outOfRange: boolean } | null {
-  if (points.length === 0) return null
-  const first = points[0], last = points[points.length - 1]
-  if (qTarget <= first.Q) return { eta: first.eta, outOfRange: qTarget < first.Q }
-  if (qTarget >= last.Q) return { eta: last.eta, outOfRange: qTarget > last.Q }
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i], b = points[i + 1]
-    if (qTarget >= a.Q && qTarget <= b.Q) {
-      const t = (b.Q === a.Q) ? 0 : (qTarget - a.Q) / (b.Q - a.Q)
-      return { eta: a.eta + t * (b.eta - a.eta), outOfRange: false }
-    }
-  }
-  return null
-}
-
-export function evaluateRunnerDiameterCandidates(
-  head: number, flowRate: number, N: number, targetNsp: number,
-  d1Theoretical: number, rangePct = 0.10, stepM = 0.005,
-): RunnerDiameterCandidate[] {
-  const out: RunnerDiameterCandidate[] = []
-  const etaAtTarget = predictEfficiencyFrancis(targetNsp)
-  if (etaAtTarget <= 0) return out
-
-  const dMin = d1Theoretical * (1 - rangePct)
-  const dMax = d1Theoretical * (1 + rangePct)
-
-  for (let D1 = dMin; D1 <= dMax + 1e-9; D1 += stepM) {
-    const ownRatedHead = Math.pow(D1 * N / N11_FRANCIS, 2)
-    const ownRatedFlow = nspTargetFlowRate(ownRatedHead, N, targetNsp, predictEfficiencyFrancis)
-    if (ownRatedFlow === null || ownRatedFlow <= 0 || !isFinite(ownRatedHead)) continue
-
-    let siteEta: number | null = null
-    let sitePower: number | null = null
-    let outOfRange = false
-    try {
-      const detail = calcFrancisDetailedParams(ownRatedHead, ownRatedFlow, etaAtTarget, N, targetNsp)
-      const curve  = calcFrancisEfficiencyCurve(detail, head, N)
-      const interp = interpEffPoint(curve, flowRate)
-      if (interp) {
-        siteEta    = interp.eta
-        outOfRange = interp.outOfRange
-        sitePower  = (RHO * G * flowRate * head * siteEta) / 1000
-      }
-    } catch {
-      siteEta = null
-    }
-
-    out.push({ D1, ownRatedHead, ownRatedFlow, siteEta, sitePower, outOfRange })
-  }
-
-  return out.sort((a, b) => (b.siteEta ?? -1) - (a.siteEta ?? -1))
-}
-
-
+// ── 効率曲線データ生成（統合版） ──────────────────────────────
 // フランシス水車かつ francisDetail がある場合は 1d損失モデルを使用。
 // その他は従来の簡易2次式。
 export function getEfficiencyCurve(
