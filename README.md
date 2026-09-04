@@ -196,3 +196,4 @@ water-turbine/
 - `src/lib/turbine-calc.ts` — 計算式のカスタマイズ
 - `supabase/migrations/` — テーブル追加・カラム追加
 - `supabase/migrations/002_selection_ranges.sql` のシードデータ — 適用範囲の調整
+# water-turbine-test
