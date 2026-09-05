@@ -247,9 +247,11 @@ function calcPeltonDimensions(ns: number, head: number, flowRate: number, runner
 }
 
 // ── フランシス専用 ─────────────────────────────────────────────
-function calcFrancisDimensions(ns: number, flowRate: number, runnerDiameter: number) {
-  const outletDiameter = runnerDiameter
-  const inletDiameter = outletDiameter * (0.97 + 0.04 * (ns / 200))
+function calcFrancisDimensions(ns: number, flowRate: number, outletDiameter: number, inletDiameter: number) {
+  // outletDiameter（D2相当・バンド側出口径）／inletDiameter（D1相当・クラウン側入口径）は
+  // calcFrancisDetailedParams（1次元損失モデル、単位速度N11ベース）の値をそのまま使う。
+  // 以前はここで独自の経験式（runnerDiameter×簡易補正）から別途計算しており、
+  // 詳細設計タブの値と食い違う「二重計算」の原因になっていたため一本化した。
   const guideVaneHeight = outletDiameter * 0.18 * Math.pow(ns / 100, 0.45)
   const spiralCaseInlet = Math.sqrt(4 * flowRate / (PI * 6.0))
   let numBlades: number
@@ -785,8 +787,8 @@ export function calculate(inputs: TurbineInputs, forcedType?: TurbineType, nsRan
 
   // ── 形式別専用寸法 ──
   const peltonDim      = turbineType === 'ペルトン水車'     ? calcPeltonDimensions(specificSpeed, head, flowRate, runnerDiameter)   : null
-  const francisDim     = turbineType === 'フランシス水車'   ? calcFrancisDimensions(specificSpeed, flowRate, runnerDiameter)        : null
   const francisDetail  = turbineType === 'フランシス水車'   ? calcFrancisDetailedParams(head, flowRate, effForGeometry, ratedRpm, specificSpeed) : null
+  const francisDim     = francisDetail                      ? calcFrancisDimensions(specificSpeed, flowRate, francisDetail.D2, francisDetail.D1) : null
   const kaplanDim      = turbineType === 'カプラン水車'     ? calcKaplanDimensions(specificSpeed, flowRate, runnerDiameter)         : null
   const crossflowDim   = turbineType === 'クロスフロー水車' ? calcCrossflowDimensions(head, flowRate, runnerDiameter)              : null
   const tubularDim     = turbineType === 'チューブラ水車'   ? calcTubularDimensions(specificSpeed, flowRate, runnerDiameter)       : null
